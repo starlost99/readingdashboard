@@ -43,6 +43,9 @@ label{display:block;margin-bottom:10px;font-size:12px;opacity:.85}label input:no
 .cy{padding:10px 14px;border:1px solid var(--ln);border-radius:10px;background:var(--tint);margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
 .lgh{display:flex;gap:8px;align-items:center;margin-bottom:12px}.lgh input{flex:1;min-width:0}.sv{font-size:11px;opacity:.5}
 .two{display:flex;gap:8px;align-items:center}.two button{padding:9px 16px;font-size:13px}
+.pb{position:relative;display:flex;height:10px;border-radius:99px;overflow:hidden;margin:6px 0 10px}.pb i{display:block;height:100%}.pb u{position:absolute;top:0;bottom:0;width:3px;background:#fff;transform:translateX(-50%)}
+.tls{display:flex;gap:14px;flex-wrap:wrap;margin:4px 0}.tl small{opacity:.6}.wk{display:flex;gap:4px;margin:8px 0}.wk button{flex:1;padding:6px 0;font-size:10px;display:flex;flex-direction:column;align-items:center;gap:2px}
+.cg{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:8px}.cg div{text-align:center;padding:8px 4px;border-radius:8px;border:1px solid var(--ln)}.cg b{display:block;font-size:16px}.cg small{font-size:10px;opacity:.7}
 </style></head><body>
 <div id="app"></div>
 <dialog id="dlg"><form></form></dialog>
@@ -96,12 +99,12 @@ async function flush(){if(busy)return;busy=true;let tries=0;
  busy=false;msg?draw():drawLog()}
 function cyc(d){const P=arr('period').filter(p=>p.start).sort((a,b)=>a.start.localeCompare(b.start));if(!P.length)return null;
  const dd=(a,b)=>Math.round((new Date(b+'T12:00')-new Date(a+'T12:00'))/864e5),avg=a=>a.length?a.reduce((s,x)=>s+x,0)/a.length:null;
- const cl=Math.round(avg(P.slice(1).map((p,i)=>dd(P[i].start,p.start)).slice(-6))||28),pl=Math.round(avg(P.filter(p=>p.end).map(p=>dd(p.start,p.end)+1).slice(-6))||5);
+ const gp=P.slice(1).map((p,i)=>dd(P[i].start,p.start)).slice(-6),ga=avg(gp),dev=gp.length>=2?avg(gp.map(x=>Math.abs(x-ga))):null,cl=Math.round(ga||28),pl=Math.round(avg(P.filter(p=>p.end).map(p=>dd(p.start,p.end)+1).slice(-6))||5);
  let o=null;P.forEach(p=>{if(p.start<=d)o=p});if(!o)return null;
  const day=dd(o.start,d)+1;if(day>cl+10)return null;
  const ov=Math.max(pl+1,Math.round(cl/2)),ps=Math.max(ov+2,cl-6),ph=day<=pl?'menstrual':day>=ps?'pms':day<ov-1?'follicular':day<=ov+1?'ovulatory':'luteal';
  const nx=new Date(o.start+'T12:00');nx.setDate(nx.getDate()+cl);
- return{day,ph,o,next:nx.toLocaleDateString('sv'),on:!o.end||d<=o.end}}
+ return{day,ph,o,cl,pl,ov,ps,dev,n:gp.length,next:nx.toLocaleDateString('sv'),on:!o.end||d<=o.end}}
 function logView(){const t=today();if(!LD||LD>t)LD=t;const e=ent(LD),c=cyc(LD),sy=new Set(e.symptoms||[]),o=e.orgasm,
  B=(a,x,on,tx)=>`<button data-a=${a} ${x} class="${on?'pri':''}">${tx}</button>`,
  sc=(k,l,lo,hi)=>`<div class=lbl>${l}</div><div class=sc>${[1,2,3,4,5].map(v=>B('lg-s',`data-k=${k} data-v=${v}`,e[k]===v,v)).join('')}</div><div class=sv style="display:flex;justify-content:space-between"><span>${lo}</span><span>${hi}</span></div>`,
@@ -112,7 +115,8 @@ function logView(){const t=today();if(!LD||LD>t)LD=t;const e=ent(LD),c=cyc(LD),s
  +sc('mood','Mood','low','great')+sc('energy','Energy','drained','buzzing')+sc('sleep','Sleep quality','rough','restful')
  +`<div class=lbl>Hours slept</div><select id=lgh><option value="">—</option>${SHR.map((r,i)=>`<option value=${i+1}${e.sleepHours===i+1?' selected':''}>${r} hrs</option>`).join('')}</select>`
  +`<div class=lbl>Orgasm</div><div class=two>${B('lg-o','data-v=y',o===true,'Yes')}${B('lg-o','data-v=n',o===false,'No')}${o===true?B('lg-c','data-d=-1',0,'−')+`<b>${e.orgasmCount||1}</b>`+B('lg-c','data-d=1',0,'+'):''}</div>`
- +SG.map(([n,l])=>`<div class=lbl>${n}</div><div class=chips>${l.map(s=>B('lg-y',`data-s="${s}"`,sy.has(s),(SI[s]||'•')+' '+s).replace('class="','class="ch ')).join('')}</div>`).join('')}
+ +SG.map(([n,l])=>`<div class=lbl>${n}</div><div class=chips>${l.map(s=>B('lg-y',`data-s="${s}"`,sy.has(s),(SI[s]||'•')+' '+s).replace('class="','class="ch ')).join('')}</div>`).join('')
+ +note(c)+dt('cy','🌙 Cycle overview',cycPanel(c))+dt('hd','📅 On this cycle day',c?hist(c.day,c,LD):'<p class=empty>Log a period first.</p>')}
 async function lgPer(kind){const a=arr('period').map(x=>({...x}));
  if(kind==='start'){if(a.some(p=>p.start===LD))return;a.push({id:'p_'+Date.now(),start:LD})}
  else{const o=a.filter(p=>!p.end).sort((x,y)=>y.start.localeCompare(x.start))[0];if(!o||o.start>LD)return;o.end=LD}
@@ -124,8 +128,53 @@ function logAct(b){const a=b.dataset.a,d=b.dataset,e=ent(LD);
  else if(a==='lg-k')setMood(LD,{sick:e.sick?undefined:true});
  else if(a==='lg-o'){const y=d.v==='y';setMood(LD,e.orgasm===y?{orgasm:undefined,orgasmCount:undefined}:{orgasm:y,orgasmCount:y?e.orgasmCount||1:0})}
  else if(a==='lg-c')setMood(LD,{orgasmCount:Math.max(1,(e.orgasmCount||1)+ +d.d)});
- else if(a==='lg-t'){LD=today();drawLog()}
+ else if(a==='lg-t'){LD=today();WK=null;drawLog();drawLetter()}
+ else if(a==='lg-w'){WK=WK===+d.d?null:+d.d;drawLog()}
+ else if(a==='lg-q'){QO++;drawLog()}
  else if(a==='lg-p')lgPer(d.v)}
+
+
+const OPEN={},PC={menstrual:'#ff7a9c',follicular:'#a3be8c',ovulatory:'#f6c177',luteal:'#c4a7e7',pms:'#ff9ecf'},LK='ao3_cycle_letters_v1';
+const TXT={menstrual:["It's okay if today is just survivable. Survivable is still a form of winning.","Rest isn't something you have to earn back later. It's allowed right now.","Heat applied early beats waiting for the cramps to peak.","Iron dips this week: lentils, greens or red meat help."],
+follicular:["You've got a little spark back. Spend it on something that interests you.","Today's a fine day to start something instead of adding it to the list.","Energy tends to climb from here, so front-load the annoying tasks.","Small sparks of 'I want to' are worth following."],
+ovulatory:["Some days you're just easier to be around, even to yourself. Today's one of them.","Social energy often peaks here. A decent window for plans you've been putting off.","Warm up a little longer before anything intense; ligaments loosen around ovulation.","You can be a lot today, in the good way."],
+luteal:["You're allowed to feel a lot today and not have a tidy reason for it.","Cravings ramp up here. A real snack on hand beats fighting it all day.","Sleep gets lighter in this phase. Winding down earlier may help.","Close open loops rather than starting something new."],
+pms:["It's fine to have zero patience today. That's not a character flaw.","Magnesium-rich food (nuts, dark chocolate, leafy greens) is worth leaning into.","Comfort over adventure today. No one's grading the choice.","Restock now. Future you in three days won't want to run to the store."]};
+let WK=null,QO=0,LT=null;
+const fd=d=>new Date(d+'T12:00').toLocaleDateString(undefined,{month:'short',day:'numeric'});
+const dt=(k,t,b)=>`<details data-o=${k}${OPEN[k]?' open':''}><summary>${t}</summary><div class=pn>${b}</div></details>`;
+const phd=(day,c)=>{day=((day-1)%c.cl)+1;return day<=c.pl?'menstrual':day>=c.ps?'pms':day<c.ov-1?'follicular':day<=c.ov+1?'ovulatory':'luteal'};
+function hist(day,c,ex){day=((day-1)%c.cl)+1;const A=moodArr(),w=e=>e.sick?.25:1,ph=phd(day,c),f=fn=>A.filter(e=>{const k=cyc(e.date);return k&&e.date!==ex&&fn(k)});
+ let L=f(k=>k.day===day),fb=0;if(!L.length){L=f(k=>k.ph===ph);fb=1}
+ const av=(K,S)=>{const v=S.filter(e=>typeof e[K]==='number'),W=v.reduce((s,e)=>s+w(e),0);return W?v.reduce((s,e)=>s+e[K]*w(e),0)/W:null};
+ const tl=[['mood','😊'],['energy','⚡'],['sleep','😴']].map(([K,i])=>{const a=av(K,L);if(a==null)return'';const b=av(K,A),d=b==null?0:a-b;return `<span class=tl>${i} <b>${a.toFixed(1)}</b> <small>${Math.abs(d)<.15?'usual':(d>0?'▲':'▼')+Math.abs(d).toFixed(1)}</small></span>`}).join('');
+ const cn={};L.forEach(e=>(e.symptoms||[]).forEach(s=>cn[s]=(cn[s]||0)+1));
+ const sy=Object.entries(cn).sort((a,b)=>b[1]-a[1]).slice(0,10);
+ return L.length?`<div class=m>${fb?`no logs for day ${day} yet, showing the ${PH[ph][1]} phase average`:`day ${day} · from ${L.length} logged day${L.length>1?'s':''}`} (sick days count for less)</div><div class=tls>${tl}</div><div class=chips style="margin-top:6px">${sy.map(([s,n])=>`<span class=b>${SI[s]||'•'} ${s} ×${n}</span>`).join('')}</div>`:`<p class=empty>No history for day ${day} yet.</p>`}
+function cycPanel(c){if(!c)return'<p class=empty>Log a period start first.</p>';
+ const w=x=>x<0?x+c.cl:x,T=[['🩸','Period',c.cl+1-c.day],['🌸','PMS',w(c.ps-c.day)],['🌕','Ovulation',w(c.ov-c.day)]].sort((a,b)=>a[2]-b[2]),
+ sp=Math.max(1,Math.round(c.dev||0)),sh=n=>{const x=new Date(c.next+'T12:00');x.setDate(x.getDate()+n);return fd(x.toLocaleDateString('sv'))},
+ cf=c.n<2?'Low':c.n>=4&&c.dev<=1.5?'High':c.dev!=null&&c.dev<=3.5?'Moderate':'Low',
+ wd=d=>{const x=new Date(LD+'T12:00');x.setDate(x.getDate()+d);return x.toLocaleDateString(undefined,{weekday:'short'}).slice(0,2)};
+ const runs=[];for(let i=1;i<=c.cl;i++){const p=phd(i,c),l=runs[runs.length-1];l&&l[0]===p?l[1]++:runs.push([p,1])}
+ return `<div class=cg>${T.map(([i,l,n])=>`<div><b>${n<=0?'now':n+'d'}</b><small>${i} ${l}</small></div>`).join('')}</div>`
+ +row('Expected '+fd(c.next),`likely ${sh(-sp)} – ${sh(sp)} · confidence ${cf}`)
+ +row(`Avg cycle ${c.cl} days · period ${c.pl} days`,c.dev!=null?`recent cycles vary by ±${c.dev.toFixed(1)} days`:'log more periods for a variation estimate')
+ +`<div class=pb>${runs.map(([p,n])=>`<i style="flex:${n};background:${PC[p]}"></i>`).join('')}<u style="left:${Math.min(100,(c.day-.5)/c.cl*100)}%"></u></div>`
+ +`<div class=wk>${[0,1,2,3,4,5,6].map(d=>`<button data-a=lg-w data-d=${d} class="${WK===d?'pri':''}">${d?wd(d):'now'}<span style="font-size:14px">${PH[phd(c.day+d,c)][0]}</span></button>`).join('')}</div>`
+ +(WK!=null?hist(c.day+WK,c,LD):'<div class=sv>Tap a day to see what you usually feel on it.</div>')}
+function note(c){if(!c)return'';const a=TXT[c.ph],i=(Math.floor(Date.parse(LD)/864e5)+QO)%a.length;
+ return `<div class=cy style="margin-top:14px"><div style="font-style:italic;font-family:Georgia,serif;flex:1">“${a[i]}”</div><button data-a=lg-q>🔮 another</button></div>`}
+const LET=()=>Array.isArray(rows[LK]?.value)?rows[LK].value:[];
+function letterView(){const c=cyc(LD||today()),cur=LET().find(x=>x.date===LD);let past='';
+ if(c){const P=arr('period').filter(p=>p.start).sort((a,b)=>a.start.localeCompare(b.start)),L=LET();
+  for(let i=P.length-2;i>=0;i--){const x=new Date(P[i].start+'T12:00');x.setDate(x.getDate()+c.day-1);const k=x.toLocaleDateString('sv'),len=Math.round((new Date(P[i+1].start)-new Date(P[i].start))/864e5),l=L.find(y=>y.date===k);
+   if(c.day>len||k>=LD||!l)continue;past+=`<div class=sr><b>${fd(k)}</b><small style="white-space:pre-wrap;opacity:.85">${esc(l.text)}</small></div>`}}
+ return dt('l','💌 Letter to future you',`<textarea id=lgl rows=4 placeholder="Anything future-you should read on this cycle day…">${esc(cur?.text||'')}</textarea><div class=sv id=lgls></div><div class=lbl>From past cycles</div>${past||'<p class=empty>Nothing written on this cycle day yet.</p>'}`)}
+function drawLetter(){const el=$('#logl');if(el)el.innerHTML=letterView()}
+async function saveLetter(d,v){const a=LET().filter(x=>x.date!==d);if(v.trim())a.push({date:d,text:v.trim()});
+ try{await persist(LK,a);const s=$('#lgls');if(s)s.textContent='saved ✓'}catch(e){msg=e.message;draw()}}
+document.addEventListener('toggle',e=>{if(e.target.dataset&&e.target.dataset.o)OPEN[e.target.dataset.o]=e.target.open},true);
 
 async function load(){const {data,error}=await sb.from('ao3_sync').select('key,value,updated_at');
  if(error)msg=error.message;else{rows={};data.forEach(r=>rows[r.key]=r);}draw();}
@@ -176,7 +225,7 @@ function draw(){const el=$('#app');
  if(!session){el.innerHTML=`<form id=login class=login><h1>Reading Dashboard</h1>${msg?`<p class=msg>${esc(msg)}</p>`:''}<label>Email<input name=email type=email required></label><label>Password<input name=pw type=password required></label><button class=pri>Sign in</button></form>`;return;}
  if(!F.m)F.m=today().slice(0,7);
  const T=[['log','Today'],['read','Reading'],['fics','Fics'],['mood','Mood'],['period','Period'],['raw','Raw data']];
- el.innerHTML=`<div class=modal><div class=top><div><b>Reading Dashboard</b><span class=h>♡</span></div><div><button data-a=refresh>Refresh</button> <button data-a=out>Sign out</button></div></div><div class=body><nav class=tabs>${T.map(([k,l])=>`<button class=tab data-a=tab data-t=${k} aria-selected=${tab===k}>${l}</button>`).join('')}</nav>${msg?`<p class=msg>${esc(msg)}</p>`:''}${tab==='log'?'<div id=logv>'+logView()+'</div>':tab==='raw'?rawView():tab==='read'?readView():listView()}</div></div>`;}
+ el.innerHTML=`<div class=modal><div class=top><div><b>Reading Dashboard</b><span class=h>♡</span></div><div><button data-a=refresh>Refresh</button> <button data-a=out>Sign out</button></div></div><div class=body><nav class=tabs>${T.map(([k,l])=>`<button class=tab data-a=tab data-t=${k} aria-selected=${tab===k}>${l}</button>`).join('')}</nav>${msg?`<p class=msg>${esc(msg)}</p>`:''}${tab==='log'?'<div id=logv>'+logView()+'</div><div id=logl>'+letterView()+'</div>':tab==='raw'?rawView():tab==='read'?readView():listView()}</div></div>`;}
 
 function edit(t,i){cur={t,i};const o=i<0?{}:arr(t)[i]||{};
  $('#dlg form').innerHTML=`<h2>${i<0?'Add':'Edit'}</h2>`+S[t].map(([n,l,ty])=>`<label>${l}`+(ty==='check'?`<input type=checkbox name=${n} ${o[n]?'checked':''}>`:`<input name=${n} type=${ty==='list'?'text':ty} value="${esc(ty==='list'?(o[n]||[]).join(', '):ty==='date'?String(o[n]??'').slice(0,10):o[n])}">`)+'</label>').join('')
@@ -208,9 +257,10 @@ document.addEventListener('click',async e=>{const b=e.target.closest('[data-a]')
  else if(a==='del'){if(confirm('Delete this entry?')){const x=arr(cur.t).slice();x.splice(cur.i,1);commit(cur.t,x);}}
  else if(a==='refresh'){msg='Refreshed.';await load();}
  else if(a==='out'){await sb.auth.signOut();session=null;rows={};draw();}});
-document.addEventListener('input',e=>{if(e.target.id==='q'){q=e.target.value;more=80;$('#list').innerHTML=listItems();}});
+document.addEventListener('input',e=>{if(e.target.id==='lgl'){clearTimeout(LT);const v=e.target.value,d=LD;$('#lgls').textContent='saving…';LT=setTimeout(()=>saveLetter(d,v),700);return}
+ if(e.target.id==='q'){q=e.target.value;more=80;$('#list').innerHTML=listItems();}});
 document.addEventListener('change',async e=>{const id=e.target.id,v=e.target.value;
- if(id==='lgd'){LD=v||today();return drawLog();}if(id==='lgh')return setMood(LD,{sleepHours:v?+v:undefined});
+ if(id==='lgd'){LD=v||today();WK=null;drawLetter();return drawLog();}if(id==='lgh')return setMood(LD,{sleepHours:v?+v:undefined});
  if(id==='f'){flt=v;$('#list').innerHTML=listItems();}
  if(['fm','fd','fs','fe'].includes(id)){if(id==='fm'){F.m=v||today().slice(0,7);F.d=F.s=F.e='';}else if(id==='fd'){F.d=v;}else F[id==='fs'?'s':'e']=v;F.all=false;more=80;
   const open=[...document.querySelectorAll('details')].map(d=>d.open);draw();document.querySelectorAll('details').forEach((d,i)=>d.open=i===0?true:open[i]);}

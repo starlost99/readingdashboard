@@ -38,6 +38,11 @@ dialog::backdrop{background:rgba(0,0,0,.7)}dialog h2{margin:0 0 10px;color:var(-
 label{display:block;margin-bottom:10px;font-size:12px;opacity:.85}label input:not([type=checkbox]),textarea{display:block;width:100%;margin-top:3px}label input[type=checkbox]{margin-left:8px}
 .btns{display:flex;gap:8px;margin-top:6px}
 .login{max-width:340px;margin:12vh auto;background:var(--bg);border:1px solid var(--p);border-radius:14px;padding:22px;box-shadow:0 0 30px rgba(255,158,207,.2)}.login h1{font-size:18px;color:var(--p2);margin:0 0 12px}
+.sc{display:flex;gap:6px}.sc button{flex:1;padding:10px 0;font-size:14px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}.ch{padding:8px 12px;font-size:13px;border-radius:99px}
+.cy{padding:10px 14px;border:1px solid var(--ln);border-radius:10px;background:var(--tint);margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.lgh{display:flex;gap:8px;align-items:center;margin-bottom:12px}.lgh input{flex:1;min-width:0}.sv{font-size:11px;opacity:.5}
+.two{display:flex;gap:8px;align-items:center}.two button{padding:9px 16px;font-size:13px}
 </style></head><body>
 <div id="app"></div>
 <dialog id="dlg"><form></form></dialog>
@@ -55,7 +60,7 @@ const S={
  mood:[['date','Date','date'],['mood','Mood','number'],['energy','Energy','number'],['sleep','Sleep','number'],['symptoms','Symptoms (comma separated)','list']],
  period:[['start','Start','date'],['end','End (empty if ongoing)','date']]};
 const MAP={fics:K.fics,notesFicMap:'ao3_notes_ficmap',total:TOT,log:K.log,periodLog:K.period,moodLog:K.mood,quizResults:'ao3_mood_quiz_results_v1',cycleDayTitles:'ao3_cycle_day_titles_v1'};
-let rows={},tab='read',q='',flt='all',more=80,msg='',session=null,cur={};
+let rows={},tab='log',q='',flt='all',more=80,msg='',session=null,cur={};
 let F={m:null,d:'',s:'',e:'',all:false};
 const dk=d=>new Date(d).toLocaleDateString('sv',{timeZone:TZ}), today=()=>dk(new Date());
 const arr=t=>Array.isArray(rows[K[t]]?.value)?rows[K[t]].value:[];
@@ -73,6 +78,54 @@ const V={
 function logRow(x){const n=((x.chapter||'').match(/^(\d+)\./)||[])[1];
  const fin=x.totalChapters!=null&&(x.totalChapters===1||(n&&+n>=x.totalChapters));
  return `<span class=t>${x.url?`<a href="${esc(x.url)}" target=_blank rel=noopener>${esc(x.title)}</a>`:esc(x.title)}</span>${fin?'<span class=st title=Completed>'+(x.totalChapters===1?'✦':'★')+'</span>':''} <span class=m>${esc(x.chapter||'')}</span><div class=m>${sp(dk(x.date)+' '+new Date(x.date).toLocaleTimeString('en-GB',{timeZone:TZ,hour:'2-digit',minute:'2-digit'}),fmt(x.words)+' words',rt(x.words),x.rating,x.fandoms?.[0])}</div>`}
+
+const SG=[["Pain & physical","Cramps,Pre-period cramps,Ovulation pain,Spasms,Headache,Tender breasts,Bloating,Muscle aches,PMS flu,Spotting"],["Skin & body","Acne,Oily hair,Watery discharge,Sweating,Hot flashes,Dry eyes,Eye strain"],["Energy & appetite","Fatigue,Hungry,Small appetite,Cravings,Craving chocolate,Vivid dreams,Nesting"],["Mood & mind","Emotional,Irritable,Anxiety,Overthinking,Self critical,Hopelessness,PMDD,Calm,Confident,Feeling okay,Hating men,Taking it personally,Over it,Sad"],["Social & libido","Sociable,Solitary,Flirty,High libido,Low libido"]].map(([n,s])=>[n,s.split(',')]);
+const SI={"Cramps":"😣","Pre-period cramps":"😖","Ovulation pain":"🥚","Spasms":"💢","Headache":"🤕","Tender breasts":"🩹","Bloating":"🎈","Muscle aches":"💪","PMS flu":"🤧","Spotting":"🩸","Acne":"🔴","Oily hair":"🧴","Watery discharge":"💧","Sweating":"💦","Hot flashes":"🥵","Dry eyes":"🏜️","Eye strain":"👀","Fatigue":"🥱","Hungry":"🍔","Small appetite":"🍽️","Cravings":"🍕","Craving chocolate":"🍫","Vivid dreams":"🔮","Nesting":"🧺","Emotional":"☁️","Irritable":"😤","Anxiety":"🌀","Overthinking":"🧠","Self critical":"🪞","Hopelessness":"🥀","PMDD":"🌪️","Calm":"🎐","Confident":"💅","Feeling okay":"🎀","Hating men":"🤹‍♂️","Taking it personally":"🎯","Over it":"🙄","Sad":"😢","Sociable":"🍹","Solitary":"🚪","Flirty":"😏","High libido":"🔥","Low libido":"🧊"};
+const SHR=["1-2","3-4","4-5","5-6","6-7","7-8","8-9","9-10","10-11","11-12","12-13","13+"];
+const PH={menstrual:['🩸','Menstrual'],follicular:['🌱','Follicular'],ovulatory:['🌕','Ovulatory'],luteal:['🍂','Luteal'],pms:['🌸','PMS']};
+let LD=null,pend=[],busy=false;
+function apply(a,d,ch){const i=a.findIndex(e=>e.date===d),o={...(i<0?{date:d}:a[i]),...ch};Object.keys(o).forEach(k=>o[k]===undefined&&delete o[k]);i<0?a.push(o):a[i]=o}
+const moodArr=()=>{const a=arr('mood').map(e=>({...e}));pend.forEach(([d,ch])=>apply(a,d,ch));return a};
+const ent=d=>moodArr().find(e=>e.date===d)||{};
+function drawLog(){const el=$('#logv');if(el)el.innerHTML=logView()}
+function setMood(d,ch){pend.push([d,ch]);drawLog();flush()}
+async function flush(){if(busy)return;busy=true;let tries=0;
+ while(pend.length){const n=pend.length,v=moodArr();
+  try{await persist(K.mood,v);pend.splice(0,n);tries=0}
+  catch(e){if(/changed somewhere/.test(e.message)&&++tries<4)continue;msg=e.message;pend=[];break}}
+ busy=false;msg?draw():drawLog()}
+function cyc(d){const P=arr('period').filter(p=>p.start).sort((a,b)=>a.start.localeCompare(b.start));if(!P.length)return null;
+ const dd=(a,b)=>Math.round((new Date(b+'T12:00')-new Date(a+'T12:00'))/864e5),avg=a=>a.length?a.reduce((s,x)=>s+x,0)/a.length:null;
+ const cl=Math.round(avg(P.slice(1).map((p,i)=>dd(P[i].start,p.start)).slice(-6))||28),pl=Math.round(avg(P.filter(p=>p.end).map(p=>dd(p.start,p.end)+1).slice(-6))||5);
+ let o=null;P.forEach(p=>{if(p.start<=d)o=p});if(!o)return null;
+ const day=dd(o.start,d)+1;if(day>cl+10)return null;
+ const ov=Math.max(pl+1,Math.round(cl/2)),ps=Math.max(ov+2,cl-6),ph=day<=pl?'menstrual':day>=ps?'pms':day<ov-1?'follicular':day<=ov+1?'ovulatory':'luteal';
+ const nx=new Date(o.start+'T12:00');nx.setDate(nx.getDate()+cl);
+ return{day,ph,o,next:nx.toLocaleDateString('sv'),on:!o.end||d<=o.end}}
+function logView(){const t=today();if(!LD||LD>t)LD=t;const e=ent(LD),c=cyc(LD),sy=new Set(e.symptoms||[]),o=e.orgasm,
+ B=(a,x,on,tx)=>`<button data-a=${a} ${x} class="${on?'pri':''}">${tx}</button>`,
+ sc=(k,l,lo,hi)=>`<div class=lbl>${l}</div><div class=sc>${[1,2,3,4,5].map(v=>B('lg-s',`data-k=${k} data-v=${v}`,e[k]===v,v)).join('')}</div><div class=sv style="display:flex;justify-content:space-between"><span>${lo}</span><span>${hi}</span></div>`,
+ per=c&&c.on&&!c.o.end?'end':'start';
+ return `<div class=lgh><input type=date id=lgd value="${LD}" max="${t}">${LD!==t?B('lg-t','',0,'Today'):''}<span class=sv>${busy||pend.length?'saving…':'saved ✓'}</span></div>`
+ +`<div class=cy><div>${c?`<b>${PH[c.ph][0]} Day ${c.day} · ${PH[c.ph][1]}</b><div class=m>${LD===t?'next period ~'+c.next:'cycle position that day'}</div>`:'<b>No cycle day yet</b><div class=m>Log a period start to begin</div>'}</div>${B('lg-p','data-v='+per,0,per==='end'?'Period ended':'Period started')}</div>`
+ +B('lg-k','',e.sick,e.sick?'🤒 Sick day (tap to undo)':'🤒 I was sick this day')
+ +sc('mood','Mood','low','great')+sc('energy','Energy','drained','buzzing')+sc('sleep','Sleep quality','rough','restful')
+ +`<div class=lbl>Hours slept</div><select id=lgh><option value="">—</option>${SHR.map((r,i)=>`<option value=${i+1}${e.sleepHours===i+1?' selected':''}>${r} hrs</option>`).join('')}</select>`
+ +`<div class=lbl>Orgasm</div><div class=two>${B('lg-o','data-v=y',o===true,'Yes')}${B('lg-o','data-v=n',o===false,'No')}${o===true?B('lg-c','data-d=-1',0,'−')+`<b>${e.orgasmCount||1}</b>`+B('lg-c','data-d=1',0,'+'):''}</div>`
+ +SG.map(([n,l])=>`<div class=lbl>${n}</div><div class=chips>${l.map(s=>B('lg-y',`data-s="${s}"`,sy.has(s),(SI[s]||'•')+' '+s).replace('class="','class="ch ')).join('')}</div>`).join('')}
+async function lgPer(kind){const a=arr('period').map(x=>({...x}));
+ if(kind==='start'){if(a.some(p=>p.start===LD))return;a.push({id:'p_'+Date.now(),start:LD})}
+ else{const o=a.filter(p=>!p.end).sort((x,y)=>y.start.localeCompare(x.start))[0];if(!o||o.start>LD)return;o.end=LD}
+ a.sort((x,y)=>x.start.localeCompare(y.start));
+ try{await persist(K.period,a);msg='Saved.'}catch(e){msg=e.message}draw()}
+function logAct(b){const a=b.dataset.a,d=b.dataset,e=ent(LD);
+ if(a==='lg-s')setMood(LD,{[d.k]:e[d.k]===+d.v?undefined:+d.v});
+ else if(a==='lg-y'){const l=new Set(e.symptoms||[]);l.has(d.s)?l.delete(d.s):l.add(d.s);setMood(LD,{symptoms:[...l]})}
+ else if(a==='lg-k')setMood(LD,{sick:e.sick?undefined:true});
+ else if(a==='lg-o'){const y=d.v==='y';setMood(LD,e.orgasm===y?{orgasm:undefined,orgasmCount:undefined}:{orgasm:y,orgasmCount:y?e.orgasmCount||1:0})}
+ else if(a==='lg-c')setMood(LD,{orgasmCount:Math.max(1,(e.orgasmCount||1)+ +d.d)});
+ else if(a==='lg-t'){LD=today();drawLog()}
+ else if(a==='lg-p')lgPer(d.v)}
 
 async function load(){const {data,error}=await sb.from('ao3_sync').select('key,value,updated_at');
  if(error)msg=error.message;else{rows={};data.forEach(r=>rows[r.key]=r);}draw();}
@@ -122,8 +175,8 @@ function rawView(){return `<p class=m>Every synced key. Edit carefully, this is 
 function draw(){const el=$('#app');
  if(!session){el.innerHTML=`<form id=login class=login><h1>Reading Dashboard</h1>${msg?`<p class=msg>${esc(msg)}</p>`:''}<label>Email<input name=email type=email required></label><label>Password<input name=pw type=password required></label><button class=pri>Sign in</button></form>`;return;}
  if(!F.m)F.m=today().slice(0,7);
- const T=[['read','Reading'],['fics','Fics'],['mood','Mood'],['period','Period'],['raw','Raw data']];
- el.innerHTML=`<div class=modal><div class=top><div><b>Reading Dashboard</b><span class=h>♡</span></div><div><button data-a=refresh>Refresh</button> <button data-a=out>Sign out</button></div></div><div class=body><nav class=tabs>${T.map(([k,l])=>`<button class=tab data-a=tab data-t=${k} aria-selected=${tab===k}>${l}</button>`).join('')}</nav>${msg?`<p class=msg>${esc(msg)}</p>`:''}${tab==='raw'?rawView():tab==='read'?readView():listView()}</div></div>`;}
+ const T=[['log','Today'],['read','Reading'],['fics','Fics'],['mood','Mood'],['period','Period'],['raw','Raw data']];
+ el.innerHTML=`<div class=modal><div class=top><div><b>Reading Dashboard</b><span class=h>♡</span></div><div><button data-a=refresh>Refresh</button> <button data-a=out>Sign out</button></div></div><div class=body><nav class=tabs>${T.map(([k,l])=>`<button class=tab data-a=tab data-t=${k} aria-selected=${tab===k}>${l}</button>`).join('')}</nav>${msg?`<p class=msg>${esc(msg)}</p>`:''}${tab==='log'?'<div id=logv>'+logView()+'</div>':tab==='raw'?rawView():tab==='read'?readView():listView()}</div></div>`;}
 
 function edit(t,i){cur={t,i};const o=i<0?{}:arr(t)[i]||{};
  $('#dlg form').innerHTML=`<h2>${i<0?'Add':'Edit'}</h2>`+S[t].map(([n,l,ty])=>`<label>${l}`+(ty==='check'?`<input type=checkbox name=${n} ${o[n]?'checked':''}>`:`<input name=${n} type=${ty==='list'?'text':ty} value="${esc(ty==='list'?(o[n]||[]).join(', '):ty==='date'?String(o[n]??'').slice(0,10):o[n])}">`)+'</label>').join('')
@@ -145,7 +198,7 @@ async function save(form){const fd=new FormData(form);
  if(t==='mood'){const j=a.findIndex((x,k)=>x.date===o.date&&x!==o);if(j>=0)a.splice(j,1);}
  commit(t,a);}
 
-document.addEventListener('click',async e=>{const b=e.target.closest('[data-a]');if(!b)return;const a=b.dataset.a;
+document.addEventListener('click',async e=>{const b=e.target.closest('[data-a]');if(!b)return;const a=b.dataset.a;if(a.startsWith('lg-'))return logAct(b);
  if(a==='tab'){tab=b.dataset.t;more=80;msg='';draw();}
  else if(a==='edit')edit(b.dataset.t,+b.dataset.i);else if(a==='add')edit(b.dataset.t,-1);
  else if(a==='raw')editRaw(b.dataset.k);else if(a==='more'){more+=80;draw();}
@@ -157,6 +210,7 @@ document.addEventListener('click',async e=>{const b=e.target.closest('[data-a]')
  else if(a==='out'){await sb.auth.signOut();session=null;rows={};draw();}});
 document.addEventListener('input',e=>{if(e.target.id==='q'){q=e.target.value;more=80;$('#list').innerHTML=listItems();}});
 document.addEventListener('change',async e=>{const id=e.target.id,v=e.target.value;
+ if(id==='lgd'){LD=v||today();return drawLog();}if(id==='lgh')return setMood(LD,{sleepHours:v?+v:undefined});
  if(id==='f'){flt=v;$('#list').innerHTML=listItems();}
  if(['fm','fd','fs','fe'].includes(id)){if(id==='fm'){F.m=v||today().slice(0,7);F.d=F.s=F.e='';}else if(id==='fd'){F.d=v;}else F[id==='fs'?'s':'e']=v;F.all=false;more=80;
   const open=[...document.querySelectorAll('details')].map(d=>d.open);draw();document.querySelectorAll('details').forEach((d,i)=>d.open=i===0?true:open[i]);}

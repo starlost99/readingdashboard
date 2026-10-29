@@ -46,6 +46,7 @@ label{display:block;margin-bottom:10px;font-size:12px;opacity:.85}label input:no
 .pb{position:relative;display:flex;height:10px;border-radius:99px;overflow:hidden;margin:6px 0 10px}.pb i{display:block;height:100%}.pb u{position:absolute;top:0;bottom:0;width:3px;background:#fff;transform:translateX(-50%)}
 .tls{display:flex;gap:14px;flex-wrap:wrap;margin:4px 0}.tl small{opacity:.6}.wk{display:flex;gap:4px;margin:8px 0}.wk button{flex:1;padding:6px 0;font-size:10px;display:flex;flex-direction:column;align-items:center;gap:2px}
 .cg{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:8px}.cg div{text-align:center;padding:8px 4px;border-radius:8px;border:1px solid var(--ln)}.cg b{display:block;font-size:16px}.cg small{font-size:10px;opacity:.7}
+.co{display:flex;gap:12px;align-items:center;margin-bottom:12px}.co .em{font-size:42px;line-height:1}.co .m{opacity:.75}
 </style></head><body>
 <div id="app"></div>
 <dialog id="dlg"><form></form></dialog>
@@ -111,6 +112,7 @@ function logView(){const t=today();if(!LD||LD>t)LD=t;const e=ent(LD),c=cyc(LD),s
  per=c&&c.on&&!c.o.end?'end':'start';
  return `<div class=lgh><input type=date id=lgd value="${LD}" max="${t}">${LD!==t?B('lg-t','',0,'Today'):''}<span class=sv>${busy||pend.length?'saving…':'saved ✓'}</span></div>`
  +`<div class=cy><div>${c?`<b>${PH[c.ph][0]} Day ${c.day} · ${PH[c.ph][1]}</b><div class=m>${LD===t?'next period ~'+c.next:'cycle position that day'}</div>`:'<b>No cycle day yet</b><div class=m>Log a period start to begin</div>'}</div>${B('lg-p','data-v='+per,0,per==='end'?'Period ended':'Period started')}</div>`
+ +dayScoreRow(c)+companion(c)
  +B('lg-k','',e.sick,e.sick?'🤒 Sick day (tap to undo)':'🤒 I was sick this day')
  +sc('mood','Mood','low','great')+sc('energy','Energy','drained','buzzing')+sc('sleep','Sleep quality','rough','restful')
  +`<div class=lbl>Hours slept</div><select id=lgh><option value="">—</option>${SHR.map((r,i)=>`<option value=${i+1}${e.sleepHours===i+1?' selected':''}>${r} hrs</option>`).join('')}</select>`
@@ -131,6 +133,7 @@ function logAct(b){const a=b.dataset.a,d=b.dataset,e=ent(LD);
  else if(a==='lg-t'){LD=today();WK=null;drawLog();drawLetter()}
  else if(a==='lg-w'){WK=WK===+d.d?null:+d.d;drawLog()}
  else if(a==='lg-q'){QO++;drawLog()}
+ else if(a==='lg-h')pet()
  else if(a==='lg-p')lgPer(d.v)}
 
 
@@ -150,7 +153,7 @@ function hist(day,c,ex){day=((day-1)%c.cl)+1;const A=moodArr(),w=e=>e.sick?.25:1
  const tl=[['mood','😊'],['energy','⚡'],['sleep','😴']].map(([K,i])=>{const a=av(K,L);if(a==null)return'';const b=av(K,A),d=b==null?0:a-b;return `<span class=tl>${i} <b>${a.toFixed(1)}</b> <small>${Math.abs(d)<.15?'usual':(d>0?'▲':'▼')+Math.abs(d).toFixed(1)}</small></span>`}).join('');
  const cn={};L.forEach(e=>(e.symptoms||[]).forEach(s=>cn[s]=(cn[s]||0)+1));
  const sy=Object.entries(cn).sort((a,b)=>b[1]-a[1]).slice(0,10);
- return L.length?`<div class=m>${fb?`no logs for day ${day} yet, showing the ${PH[ph][1]} phase average`:`day ${day} · from ${L.length} logged day${L.length>1?'s':''}`} (sick days count for less)</div><div class=tls>${tl}</div><div class=chips style="margin-top:6px">${sy.map(([s,n])=>`<span class=b>${SI[s]||'•'} ${s} ×${n}</span>`).join('')}</div>`:`<p class=empty>No history for day ${day} yet.</p>`}
+ return L.length?`${scoreHtml(scoreFor(day,c,ex))}<div class=m>${fb?`no logs for day ${day} yet, showing the ${PH[ph][1]} phase average`:`day ${day} · from ${L.length} logged day${L.length>1?'s':''}`} (sick days count for less)</div><div class=tls>${tl}</div><div class=chips style="margin-top:6px">${sy.map(([s,n])=>`<span class=b>${SI[s]||'•'} ${s} ×${n}</span>`).join('')}</div>`:`<p class=empty>No history for day ${day} yet.</p>`}
 function cycPanel(c){if(!c)return'<p class=empty>Log a period start first.</p>';
  const w=x=>x<0?x+c.cl:x,T=[['🩸','Period',c.cl+1-c.day],['🌸','PMS',w(c.ps-c.day)],['🌕','Ovulation',w(c.ov-c.day)]].sort((a,b)=>a[2]-b[2]),
  sp=Math.max(1,Math.round(c.dev||0)),sh=n=>{const x=new Date(c.next+'T12:00');x.setDate(x.getDate()+n);return fd(x.toLocaleDateString('sv'))},
@@ -177,6 +180,42 @@ function drawLetter(){const el=$('#logl');if(el)el.innerHTML=letterView()}
 async function saveLetter(d,v){const a=LET().filter(x=>x.date!==d);if(v.trim())a.push({date:d,text:v.trim()});
  try{await persist(LK,a);const s=$('#lgls');if(s)s.textContent='saved ✓'}catch(e){msg=e.message;draw()}}
 document.addEventListener('toggle',e=>{if(e.target.dataset&&e.target.dataset.o)OPEN[e.target.dataset.o]=e.target.open},true);
+
+
+const VAL={"Cramps":-1,"Pre-period cramps":-.8,"Ovulation pain":-.7,"Spasms":-.8,"Headache":-.8,"Tender breasts":-.4,"Bloating":-.4,"Muscle aches":-.5,"PMS flu":-.9,"Spotting":-.2,"Acne":-.3,"Oily hair":-.15,"Watery discharge":0,"Sweating":-.25,"Hot flashes":-.5,"Dry eyes":-.25,"Eye strain":-.25,"Fatigue":-.7,"Hungry":0,"Small appetite":-.2,"Cravings":0,"Craving chocolate":0,"Vivid dreams":0,"Nesting":.1,"Emotional":-.35,"Irritable":-.6,"Anxiety":-.7,"Overthinking":-.6,"Self critical":-.7,"Hopelessness":-1,"PMDD":-1,"Calm":.7,"Confident":.8,"Feeling okay":.7,"Hating men":-.3,"Taking it personally":-.5,"Over it":-.5,"Sad":-.6,"Sociable":.4,"Solitary":-.2,"Flirty":.4,"High libido":.3,"Low libido":0};
+const bv=a=>a[1]?a[0]/a[1]:null;
+function dsB(ex){const B={};moodArr().forEach(e=>{if(e.date===ex)return;const k=cyc(e.date);if(!k)return;const b=B[k.day]||(B[k.day]={n:0,w:0,m:[0,0],en:[0,0],sl:[0,0],sy:{}}),w=e.sick?.25:1;b.n++;b.w+=w;
+ [['mood','m'],['energy','en'],['sleep','sl']].forEach(([K,a])=>{if(typeof e[K]==='number'){b[a][0]+=e[K]*w;b[a][1]+=w}});(e.symptoms||[]).forEach(x=>b.sy[x]=(b.sy[x]||0)+w)});return B}
+function rawScore(b){const P=[],m=bv(b.m),en=bv(b.en),sl=bv(b.sl);if(m!=null)P.push([(m-3)/2,1.3]);if(en!=null)P.push([(en-3)/2,1.1]);if(sl!=null)P.push([(sl-3)/2,.9]);
+ const E=Object.entries(b.sy);if(E.length&&b.w){let l=0;E.forEach(([x,n])=>l+=(VAL[x]||0)*n/(b.w+1));P.push([Math.tanh(l/1.2),1.5])}
+ return P.length?P.reduce((a,p)=>a+p[0]*p[1],0)/P.reduce((a,p)=>a+p[1],0):null}
+function scoreFor(day,c,ex){day=((day-1)%c.cl)+1;const b=dsB(ex)[day];if(!b)return null;const r=rawScore(b);if(r==null)return null;
+ const all=Object.values(dsB(null)),sol=all.filter(x=>x.n>=2),vs=(sol.length>=10?sol:all).map(rawScore).filter(v=>v!=null),
+ pr=Math.max(.3,Math.max(0,...vs.filter(v=>v>0))),nr=Math.max(.3,Math.max(0,...vs.filter(v=>v<0).map(v=>-v))),
+ lg=moodArr().length,ok=vs.length>=5,c1=ok?Math.min(1,lg/45):0,c2=ok?Math.min(1,lg/180):0,st=.6+.25*c2,amp=40+10*c2,
+ sc=Math.max(-1,Math.min(1,r*(r>=0?1+c1*st*(1/pr-1):1+c1*st*(1/nr-1)))),score=Math.round(Math.max(0,Math.min(100,50+sc*amp)));
+ const[label,color]=score>=72?['Likely a good day','#8fd9c4']:score>=55?['Probably a decent day','#bfe3d6']:score>=40?['A mixed day','#c4c4de']:score>=25?['Could be a tough day','#ffb38a']:['Likely a rough day','#ff9ecf'];
+ return{score,label,color,n:b.n}}
+const scoreHtml=x=>x?`<div class=sr><b style="color:${x.color}">${x.score}/100 · ${x.label}</b><div class=bar style="margin:4px 0"><i style="width:${x.score}%;background:${x.color}"></i></div><small>predicted from ${x.n} logged day${x.n>1?'s':''} in past cycles</small></div>`:'';
+const dayScoreRow=c=>c?`<div class=cy style="display:block">${scoreHtml(scoreFor(c.day,c,LD))||'<small>Day score appears once this cycle day has some history.</small>'}</div>`:'';
+
+const CK='ao3_companion_v1',MS=[7,14,30,50,100,200,365],CS=[[0,'🫧','a quiet little bubble'],[5,'🌱','a small sprout'],[15,'🌷','a budding bloom'],[40,'🌸','a full bloom'],[90,'🌺','in radiant bloom']];
+const CMSG={menstrual:["curls up next to you and doesn't ask you to be anything today.","brought you a blanket. it's not going to explain why.","thinks today is a heating-pad-and-nothing-else kind of day.","is not judging the fourth cup of tea. or the fifth.","wants you to know horizontal counts as a valid position."],
+follicular:["has a little more bounce today and is hoping you do too.","thinks today is a good day to start the thing you've been eyeing.","is pointing at your reading list with great enthusiasm.","brought a small spark. use it however you like.","is feeling optimistic and won't be talked out of it."],
+ovulatory:["is feeling extra friendly and wants you to know it.","thinks you should text that person back. today.","is glowing a little. it's not sure why. neither is anyone.","wants to go somewhere with you. anywhere.","is very proud of you for no particular reason."],
+luteal:["is nesting. it's not going to explain the nest.","thinks a cosy reread is exactly the right call.","brought snacks and zero opinions.","wants things finished, quietly, with no drama.","is staying close and keeping the volume down."],
+pms:["is lowering everyone's expectations on your behalf.","thinks comfort over adventure today. no appeals.","is guarding you from small annoyances.","brought dark chocolate and a very soft look.","is not taking anything personally on your behalf."]};
+let CM=null;
+const trk=()=>{const d=new Set();moodArr().forEach(e=>e.date&&d.add(e.date));arr('period').forEach(x=>{x.start&&d.add(x.start);x.end&&d.add(x.end)});return d.size};
+function companion(c){const n=trk();let i=0;CS.forEach((x,k)=>{if(n>=x[0])i=k});const st=CS[i],nx=CS[i+1],m=rows[CK]?.value||{},pool=CMSG[c?c.ph:'follicular'];
+ const msg=CM||pool[(Math.floor(Date.parse(LD)/864e5))%pool.length];
+ return `<div class="cy co"><div class=em>${st[1]}</div><div style="flex:1"><b>${st[2]}</b><div class=m>${n} tracked day${n===1?'':'s'}${nx?` · ${nx[0]-n} to grow`:''}${m.streak?` · 💗 ${m.streak}-day streak`:''}</div><div class=m style="margin-top:4px;font-style:italic">${esc(msg)}</div></div><button data-a=lg-h>say hi</button></div>`}
+let petBusy=false;
+async function pet(){if(petBusy)return;petBusy=true;const m={pets:0,lastPetDate:null,streak:0,...(rows[CK]?.value||{})},t=today(),y=dk(Date.now()-864e5);let ms=false;
+ if(m.lastPetDate!==t){m.streak=m.lastPetDate===y?(m.streak||0)+1:1;m.lastPetDate=t;ms=MS.includes(m.streak)}
+ m.pets=(m.pets||0)+1;const c=cyc(today()),pool=CMSG[c?c.ph:'follicular'];
+ CM=ms?`celebrates your ${m.streak}-day streak. it's a big deal to it.`:pool[Math.floor(Math.random()*pool.length)];drawLog();
+ try{await persist(CK,m)}catch(e){msg=e.message;draw()}petBusy=false;drawLog()}
 
 async function load(){const {data,error}=await sb.from('ao3_sync').select('key,value,updated_at');
  if(error)msg=error.message;else{rows={};data.forEach(r=>rows[r.key]=r);}draw();}
@@ -267,7 +306,7 @@ document.addEventListener('change',async e=>{const id=e.target.id,v=e.target.val
  if(['fm','fd','fs','fe'].includes(id)){if(id==='fm'){F.m=v||today().slice(0,7);F.d=F.s=F.e='';}else if(id==='fd'){F.d=v;}else F[id==='fs'?'s':'e']=v;F.all=false;more=80;
   const open=[...document.querySelectorAll('details')].map(d=>d.open);draw();document.querySelectorAll('details').forEach((d,i)=>d.open=i===0?true:open[i]);}
  if(id==='imp'&&e.target.files[0]&&confirm('Import this backup? It replaces the matching data in the cloud.')){
-  try{const j=JSON.parse(await e.target.files[0].text());for(const [k,key] of Object.entries(MAP))if(j[k]!==undefined)await persist(key,j[k]);msg='Backup imported.';}catch(x){msg=x.message;}await load();}});
+  try{const j=JSON.parse(await e.target.files[0].text());for(const [k,key] of Object.entries(MAP))if(j[k]!==undefined){const ex=Array.isArray(rows[key]?.value)?rows[key].value:[];await persist(key,k==='letters'&&Array.isArray(j[k])?[...ex,...j[k].filter(l=>l&&!ex.some(x=>x.date===l.date))]:j[k]);}msg='Backup imported.';}catch(x){msg=x.message;}await load();}});
 document.addEventListener('submit',async e=>{e.preventDefault();
  if(e.target.id==='login'){const f=new FormData(e.target);const {data,error}=await sb.auth.signInWithPassword({email:f.get('email'),password:f.get('pw')});
   if(error){msg=error.message;return draw();}msg='';session=data.session;load();}

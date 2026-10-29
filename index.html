@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Reading tracker</title>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;600;800&family=Newsreader:ital,wght@0,400;1,400;1,600&display=swap" rel="stylesheet">
+<style>
+:root{--paper:#E8EBF4;--card:#FBFBFE;--ink:#1D2040;--mute:#5F6485;--v:#4B35C9;--red:#C0283F;--sage:#2F7D5B;--line:#CBD0E4;--tab:#D6DAEE}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.45 "Bricolage Grotesque",system-ui,sans-serif}
+#app{max-width:860px;margin:0 auto;padding:20px 14px 60px}
+header{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;margin-bottom:18px}
+h1{font-size:2rem;font-weight:800;margin:0;letter-spacing:-.02em}header p{margin:2px 0 0;color:var(--mute)}
+button,select,input,textarea{font:inherit;color:inherit}
+button{border:1px solid var(--line);background:var(--card);border-radius:8px;padding:6px 12px;cursor:pointer}
+button:hover{border-color:var(--v)}button.pri{background:var(--v);border-color:var(--v);color:#fff}button.danger{color:var(--red);border-color:var(--red)}
+:focus-visible{outline:2px solid var(--v);outline-offset:2px}
+.tools{display:flex;gap:6px}
+.tabs{display:flex;gap:4px;overflow-x:auto;white-space:nowrap;margin-bottom:-1px;padding-top:6px}
+.tab{border-radius:12px 12px 0 0;border:1px solid var(--line);border-bottom:0;background:var(--tab);padding:8px 16px;transform:translateY(3px);color:var(--mute)}
+.tab[aria-selected=true]{background:var(--card);color:var(--ink);font-weight:600;padding-top:12px;transform:none}
+main{background:var(--card);border:1px solid var(--line);border-radius:0 12px 12px 12px;padding:14px 16px;border-top:3px double var(--line)}
+.bar{display:flex;gap:8px;margin-bottom:10px}.bar input,.bar select{border:1px solid var(--line);border-radius:8px;padding:6px 10px;background:#fff}.bar input{flex:1;min-width:0}
+.row{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line)}
+.t{font:italic 600 1.1rem Newsreader,Georgia,serif}.row em{color:var(--mute);font-family:Newsreader,serif}
+.m{color:var(--mute);font-size:.9rem}.m span{margin-right:12px}
+.b{border:1px solid currentColor;border-radius:99px;padding:0 8px;font-size:.8rem}.b.caughtup{color:var(--v)}.b.finished{color:var(--sage)}.b.reading{color:var(--mute)}
+.msg{background:#EEEBFF;border-radius:8px;padding:8px 12px;margin:0 0 10px}.empty{color:var(--mute)}
+dialog{border:1px solid var(--line);border-radius:14px;padding:18px;width:min(460px,94vw);background:var(--card);color:var(--ink)}
+dialog::backdrop{background:rgba(29,32,64,.45)}dialog h2{margin:0 0 10px}
+label{display:block;margin-bottom:10px;font-size:.9rem;color:var(--mute)}
+label input:not([type=checkbox]),textarea{display:block;width:100%;margin-top:3px;border:1px solid var(--line);border-radius:8px;padding:7px 10px;background:#fff;color:var(--ink)}
+label input[type=checkbox]{margin-left:8px}.btns{display:flex;gap:8px;margin-top:6px}
+.login{max-width:340px;margin:12vh auto}
+</style></head><body>
+<div id="app"></div>
+<dialog id="dlg"><form></form></dialog>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script>
+const SB_URL="https://YOURPROJECT.supabase.co", SB_KEY="YOUR_ANON_KEY";   // <- fill these in
+const sb=supabase.createClient(SB_URL,SB_KEY);
+const $=s=>document.querySelector(s), fmt=n=>Number(n||0).toLocaleString();
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const K={fics:'ao3_fic_tracker_v1',log:'ao3_word_log_v4',mood:'ao3_mood_log_v1',period:'ao3_period_log_v1'},TOT='ao3_word_total_v4';
+const S={
+ fics:[['title','Title','text'],['aka','Nickname','text'],['workId','Work ID','text'],['currentChapter','Chapter I am on','number'],['totalChapters','Total chapters','number'],['words','Words','number'],['caughtUp','Caught up','check'],['finished','Finished','check']],
+ log:[['title','Title','text'],['chapter','Chapter','text'],['words','Words','number'],['date','Date','date']],
+ mood:[['date','Date','date'],['mood','Mood','number'],['energy','Energy','number'],['sleep','Sleep','number'],['symptoms','Symptoms (comma separated)','list']],
+ period:[['start','Start','date'],['end','End (empty if ongoing)','date']]};
+const MAP={fics:K.fics,notesFicMap:'ao3_notes_ficmap',total:TOT,log:K.log,periodLog:K.period,moodLog:K.mood,quizResults:'ao3_mood_quiz_results_v1',cycleDayTitles:'ao3_cycle_day_titles_v1'};
+let rows={},tab='fics',q='',flt='all',more=80,msg='',session=null,cur={};
+const arr=t=>Array.isArray(rows[K[t]]?.value)?rows[K[t]].value:[];
+const st=x=>x.finished?'finished':x.caughtUp?'caught up':'reading';
+const sp=(...a)=>a.filter(Boolean).map(t=>`<span>${esc(t)}</span>`).join('');
+const V={
+ fics:x=>`<b class=t>${esc(x.title)}</b>${x.aka?` <em>${esc(x.aka)}</em>`:''}<div class=m>${sp(x.fandoms?.[0],`chapter ${x.currentChapter??'?'} of ${x.totalChapters??'?'}`,fmt(x.words)+' words')}<span class="b ${st(x).replace(' ','')}">${st(x)}</span></div>`,
+ log:x=>`<b class=t>${esc(x.title)}</b> ${esc(x.chapter||'')}<div class=m>${sp(String(x.date||'').slice(0,10),fmt(x.words)+' words')}</div>`,
+ mood:x=>`<b>${esc(x.date)}</b><div class=m>${sp('mood '+x.mood,'energy '+x.energy,'sleep '+x.sleep,...(x.symptoms||[]))}</div>`,
+ period:x=>`<b>${esc(x.start)}</b> to <b>${esc(x.end||'ongoing')}</b>`};
+
+async function load(){const {data,error}=await sb.from('ao3_sync').select('key,value,updated_at');
+ if(error)msg=error.message;else{rows={};data.forEach(r=>rows[r.key]=r);}draw();}
+async function persist(key,value){const r=rows[key];let res;
+ if(r)res=await sb.from('ao3_sync').update({value,device:'web'}).eq('key',key).eq('updated_at',r.updated_at).select('updated_at');
+ else res=await sb.from('ao3_sync').insert({key,value,device:'web'}).select('updated_at');
+ if(res.error)throw res.error;
+ if(!res.data.length){await load();throw new Error('That data changed somewhere else, so I reloaded it. Please try again.');}
+ rows[key]={key,value,updated_at:res.data[0].updated_at};}
+async function commit(t,a){try{await persist(K[t],a);
+ if(t==='log')await persist(TOT,a.reduce((s,x)=>s+(x.words||0),0));
+ msg='Saved. Your AO3 pages pick it up the next time they load.';}catch(e){msg=e.message;}
+ $('#dlg').close();draw();}
+
+function listItems(){let it=arr(tab).map((x,i)=>({x,i}));
+ if(tab==='fics'){const s=q.toLowerCase();it=it.filter(({x})=>(!s||(x.title+' '+(x.aka||'')+' '+(x.fandoms||[]).join(' ')).toLowerCase().includes(s))&&(flt==='all'||st(x)===flt));}
+ else{const d=x=>x.date||x.start||'';it.sort((a,b)=>d(b.x).localeCompare(d(a.x)));}
+ return it.slice(0,more).map(({x,i})=>`<div class=row><div>${V[tab](x)}</div><button data-a=edit data-i=${i}>Edit</button></div>`).join('')
+  +(it.length>more?'<button data-a=more>Show more</button>':'')||'<p class=empty>Nothing here yet.</p>';}
+function listView(){return `<div class=bar>${tab==='fics'?`<input id=q placeholder="Search title or fandom" value="${esc(q)}"><select id=f>${['all','reading','caught up','finished'].map(o=>`<option ${o===flt?'selected':''}>${o}</option>`).join('')}</select>`:'<span></span>'}<button class=pri data-a=add>Add</button></div><div id=list>${listItems()}</div>`;}
+function rawView(){return `<p class=m>Every synced key. Edit carefully, this is the raw JSON.</p><label>Import a backup file (replaces matching data)<input type=file id=imp accept=".json"></label><div id=list>`+Object.values(rows).sort((a,b)=>a.key.localeCompare(b.key)).map(r=>`<div class=row><div><b>${esc(r.key)}</b><div class=m>${sp(Math.round(JSON.stringify(r.value).length/1024)+' KB','updated '+r.updated_at.slice(0,16).replace('T',' '))}</div></div><button data-a=raw data-k="${esc(r.key)}">Edit</button></div>`).join('')+'</div>';}
+function draw(){const el=$('#app');
+ if(!session){el.innerHTML=`<form id=login class=login><h1>Reading tracker</h1>${msg?`<p class=msg>${esc(msg)}</p>`:''}<label>Email<input name=email type=email required></label><label>Password<input name=pw type=password required></label><button class=pri>Sign in</button></form>`;return;}
+ el.innerHTML=`<header><div><h1>Reading tracker</h1><p>${fmt(rows[TOT]?.value)} words read across ${fmt(arr('fics').length)} tracked fics</p></div><div class=tools><button data-a=refresh>Refresh</button><button data-a=out>Sign out</button></div></header>
+ <nav class=tabs>${[['fics','Fics'],['log','Reading log'],['mood','Mood'],['period','Period'],['raw','Raw data']].map(([k,l])=>`<button class=tab data-a=tab data-t=${k} aria-selected=${tab===k}>${l}</button>`).join('')}</nav>
+ <main>${msg?`<p class=msg>${esc(msg)}</p>`:''}${tab==='raw'?rawView():listView()}</main>`;}
+
+function edit(t,i){cur={t,i};const o=i<0?{}:arr(t)[i];
+ $('#dlg form').innerHTML=`<h2>${i<0?'Add':'Edit'}</h2>`+S[t].map(([n,l,ty])=>`<label>${l}`+(ty==='check'?`<input type=checkbox name=${n} ${o[n]?'checked':''}>`:`<input name=${n} type=${ty==='list'?'text':ty} value="${esc(ty==='list'?(o[n]||[]).join(', '):ty==='date'?String(o[n]??'').slice(0,10):o[n])}">`)+'</label>').join('')
+  +`<div class=btns><button class=pri>Save</button>${i<0?'':'<button type=button class=danger data-a=del>Delete</button>'}<button type=button data-a=close>Cancel</button></div>`;
+ $('#dlg').showModal();}
+function editRaw(k){cur={raw:k};$('#dlg form').innerHTML=`<h2>${esc(k)}</h2><textarea name=j rows=16>${esc(JSON.stringify(rows[k].value,null,1))}</textarea><div class=btns><button class=pri>Save</button><button type=button data-a=close>Cancel</button></div>`;$('#dlg').showModal();}
+async function save(form){const fd=new FormData(form);
+ if(cur.raw){try{await persist(cur.raw,JSON.parse(fd.get('j')));msg='Saved.';}catch(e){msg=e.message;}$('#dlg').close();return draw();}
+ const {t,i}=cur,a=arr(t).slice(),o=i<0?{}:{...a[i]};
+ S[t].forEach(([n,l,ty])=>{const v=fd.get(n);
+  if(ty==='check')o[n]=v!==null;else if(ty==='number')o[n]=v===''?undefined:+v;
+  else if(ty==='list')o[n]=v.split(',').map(s=>s.trim()).filter(Boolean);
+  else if(ty==='date'){const old=String(o[n]??'');o[n]=v===old.slice(0,10)?old:(t==='log'&&v?new Date(v+'T12:00:00').toISOString():v);}
+  else o[n]=v;});
+ if(i<0){if(t==='log'){o.id=crypto.randomUUID();o.key='manual::'+o.id;}
+  if(t==='period')o.id='p_'+Date.now();
+  if(t==='fics'){if(!o.workId){alert('A work ID is needed (the number in the fic link).');return;}o.url='https://archiveofourown.org/works/'+o.workId;o.trackedAt=new Date().toISOString();o.fandoms=[];}
+  a.push(o);}else a[i]=o;
+ if(t==='mood'){const j=a.findIndex((x,k)=>x.date===o.date&&x!==o);if(j>=0)a.splice(j,1);}
+ commit(t,a);}
+
+document.addEventListener('click',async e=>{const b=e.target.closest('[data-a]');if(!b)return;const a=b.dataset.a;
+ if(a==='tab'){tab=b.dataset.t;more=80;msg='';draw();}
+ else if(a==='edit')edit(tab,+b.dataset.i);else if(a==='add')edit(tab,-1);
+ else if(a==='raw')editRaw(b.dataset.k);else if(a==='more'){more+=80;draw();}
+ else if(a==='close')$('#dlg').close();
+ else if(a==='del'){if(confirm('Delete this entry?')){const x=arr(cur.t).slice();x.splice(cur.i,1);commit(cur.t,x);}}
+ else if(a==='refresh'){msg='Refreshed.';await load();}
+ else if(a==='out'){await sb.auth.signOut();session=null;rows={};draw();}});
+document.addEventListener('input',e=>{if(e.target.id==='q'){q=e.target.value;more=80;$('#list').innerHTML=listItems();}});
+document.addEventListener('change',async e=>{
+ if(e.target.id==='f'){flt=e.target.value;$('#list').innerHTML=listItems();}
+ if(e.target.id==='imp'&&e.target.files[0]&&confirm('Import this backup? It replaces the matching data in the cloud.')){
+  try{const j=JSON.parse(await e.target.files[0].text());for(const [k,key] of Object.entries(MAP))if(j[k]!==undefined)await persist(key,j[k]);msg='Backup imported.';}catch(x){msg=x.message;}await load();}});
+document.addEventListener('submit',async e=>{e.preventDefault();
+ if(e.target.id==='login'){const f=new FormData(e.target);const {data,error}=await sb.auth.signInWithPassword({email:f.get('email'),password:f.get('pw')});
+  if(error){msg=error.message;return draw();}msg='';session=data.session;load();}
+ else save(e.target);});
+sb.auth.getSession().then(({data})=>{session=data.session;session?load():draw();});
+</script></body></html>

@@ -62,7 +62,7 @@ const S={
  log:[['title','Title','text'],['chapter','Chapter','text'],['words','Words','number'],['date','Date','date']],
  mood:[['date','Date','date'],['mood','Mood','number'],['energy','Energy','number'],['sleep','Sleep','number'],['symptoms','Symptoms (comma separated)','list']],
  period:[['start','Start','date'],['end','End (empty if ongoing)','date']]};
-const MAP={fics:K.fics,notesFicMap:'ao3_notes_ficmap',total:TOT,log:K.log,periodLog:K.period,moodLog:K.mood,quizResults:'ao3_mood_quiz_results_v1',cycleDayTitles:'ao3_cycle_day_titles_v1'};
+const MAP={fics:K.fics,notesFicMap:'ao3_notes_ficmap',total:TOT,log:K.log,periodLog:K.period,moodLog:K.mood,quizResults:'ao3_mood_quiz_results_v1',cycleDayTitles:'ao3_cycle_day_titles_v1',letters:'ao3_cycle_letters_v1'};
 let rows={},tab='log',q='',flt='all',more=80,msg='',session=null,cur={};
 let F={m:null,d:'',s:'',e:'',all:false};
 const dk=d=>new Date(d).toLocaleDateString('sv',{timeZone:TZ}), today=()=>dk(new Date());
@@ -170,7 +170,9 @@ function letterView(){const c=cyc(LD||today()),cur=LET().find(x=>x.date===LD);le
  if(c){const P=arr('period').filter(p=>p.start).sort((a,b)=>a.start.localeCompare(b.start)),L=LET();
   for(let i=P.length-2;i>=0;i--){const x=new Date(P[i].start+'T12:00');x.setDate(x.getDate()+c.day-1);const k=x.toLocaleDateString('sv'),len=Math.round((new Date(P[i+1].start)-new Date(P[i].start))/864e5),l=L.find(y=>y.date===k);
    if(c.day>len||k>=LD||!l)continue;past+=`<div class=sr><b>${fd(k)}</b><small style="white-space:pre-wrap;opacity:.85">${esc(l.text)}</small></div>`}}
- return dt('l','💌 Letter to future you',`<textarea id=lgl rows=4 placeholder="Anything future-you should read on this cycle day…">${esc(cur?.text||'')}</textarea><div class=sv id=lgls></div><div class=lbl>From past cycles</div>${past||'<p class=empty>Nothing written on this cycle day yet.</p>'}`)}
+ return dt('l','💌 Letter to future you',`<textarea id=lgl rows=4 placeholder="Anything future-you should read on this cycle day…">${esc(cur?.text||'')}</textarea><div class=sv id=lgls></div><div class=lbl>From past cycles</div>${past||'<p class=empty>Nothing written on this cycle day yet.</p>'}`)+allLetters()}
+function allLetters(){const AL=LET().filter(x=>x&&x.date&&x.text).sort((x,y)=>y.date.localeCompare(x.date));
+ return dt('la','📚 All letters · '+AL.length,AL.length?AL.map(l=>{const k=cyc(l.date);return `<div class=sr><b>${esc(l.date)}${k?' · day '+k.day:''}</b><small style="white-space:pre-wrap;opacity:.85">${esc(l.text)}</small></div>`}).join(''):'<p class=empty>No letters found in the cloud. Check the Raw data tab for ao3_cycle_letters_v1. If it is missing, they have not synced up from your AO3 page yet.</p>')}
 function drawLetter(){const el=$('#logl');if(el)el.innerHTML=letterView()}
 async function saveLetter(d,v){const a=LET().filter(x=>x.date!==d);if(v.trim())a.push({date:d,text:v.trim()});
  try{await persist(LK,a);const s=$('#lgls');if(s)s.textContent='saved ✓'}catch(e){msg=e.message;draw()}}

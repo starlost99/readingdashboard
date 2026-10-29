@@ -47,6 +47,13 @@ label{display:block;margin-bottom:10px;font-size:12px;opacity:.85}label input:no
 .tls{display:flex;gap:14px;flex-wrap:wrap;margin:4px 0}.tl small{opacity:.6}.wk{display:flex;gap:4px;margin:8px 0}.wk button{flex:1;padding:6px 0;font-size:10px;display:flex;flex-direction:column;align-items:center;gap:2px}
 .cg{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:8px}.cg div{text-align:center;padding:8px 4px;border-radius:8px;border:1px solid var(--ln)}.cg b{display:block;font-size:16px}.cg small{font-size:10px;opacity:.7}
 .co{display:flex;gap:12px;align-items:center;margin-bottom:12px}.co .em{font-size:42px;line-height:1}.co .m{opacity:.75}
+.cn{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}.cn b{color:var(--p2);font-size:13px}.cn button{padding:2px 12px;font-size:14px}
+.cgd{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}.cgd .dh{text-align:center;font-size:10px;opacity:.4;padding-bottom:2px}
+.cgd .cd{position:relative;aspect-ratio:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0;font-size:11px;line-height:1.1;border-radius:6px;border:1px solid transparent;background:transparent;color:rgba(255,234,244,.75)}
+.cgd .cd small{font-size:7px;opacity:.65;margin-top:1px}.cgd .cd u{position:absolute;top:2px;width:4px;height:4px;border-radius:50%;background:var(--p2);text-decoration:none}
+.cgd .cd.tdy{font-weight:600;box-shadow:0 0 0 1.5px rgba(255,234,244,.5) inset}.cgd .cd.sel{box-shadow:0 0 0 1.5px #ffeaf4 inset}
+.cleg{display:flex;flex-wrap:wrap;gap:6px 12px;font-size:10px;opacity:.6;margin-top:8px}.cleg span{display:flex;align-items:center;gap:4px}.cleg i{width:8px;height:8px;border-radius:50%;display:inline-block}
+.cdet{border-top:1px solid var(--ln);margin-top:12px;padding-top:10px}
 </style></head><body>
 <div id="app"></div>
 <dialog id="dlg"><form></form></dialog>
@@ -62,7 +69,7 @@ const S={
  fics:[['title','Title','text'],['aka','Nickname','text'],['workId','Work ID','text'],['currentChapter','Chapter I am on','number'],['totalChapters','Total chapters','number'],['words','Words','number'],['caughtUp','Caught up','check'],['finished','Finished','check']],
  log:[['title','Title','text'],['chapter','Chapter','text'],['words','Words','number'],['date','Date','date']],
  mood:[['date','Date','date'],['mood','Mood','number'],['energy','Energy','number'],['sleep','Sleep','number'],['symptoms','Symptoms (comma separated)','list']],
- period:[['start','Start','date'],['end','End (empty if ongoing)','date']]};
+ period:[['start','Start','date'],['end','End (empty if ongoing)','date'],['notes','Notes','text']]};
 const MAP={fics:K.fics,notesFicMap:'ao3_notes_ficmap',total:TOT,log:K.log,periodLog:K.period,moodLog:K.mood,quizResults:'ao3_mood_quiz_results_v1',cycleDayTitles:'ao3_cycle_day_titles_v1',letters:'ao3_cycle_letters_v1'};
 let rows={},tab='log',q='',flt='all',more=80,msg='',session=null,cur={};
 let F={m:null,d:'',s:'',e:'',all:false};
@@ -91,7 +98,7 @@ let LD=null,pend=[],busy=false;
 function apply(a,d,ch){const i=a.findIndex(e=>e.date===d),o={...(i<0?{date:d}:a[i]),...ch};Object.keys(o).forEach(k=>o[k]===undefined&&delete o[k]);i<0?a.push(o):a[i]=o}
 const moodArr=()=>{const a=arr('mood').map(e=>({...e}));pend.forEach(([d,ch])=>apply(a,d,ch));return a};
 const ent=d=>moodArr().find(e=>e.date===d)||{};
-function drawLog(){const el=$('#logv');if(el)el.innerHTML=logView()}
+function drawLog(){const el=$('#logv');if(el)el.innerHTML=logView();drawCal()}
 function setMood(d,ch){pend.push([d,ch]);drawLog();flush()}
 async function flush(){if(busy)return;busy=true;let tries=0;
  while(pend.length){const n=pend.length,v=moodArr();
@@ -217,6 +224,82 @@ async function pet(){if(petBusy)return;petBusy=true;const m={pets:0,lastPetDate:
  CM=ms?`celebrates your ${m.streak}-day streak. it's a big deal to it.`:pool[Math.floor(Math.random()*pool.length)];drawLog();
  try{await persist(CK,m)}catch(e){msg=e.message;draw()}petBusy=false;drawLog()}
 
+let CALM=null,CSEL=null;
+const addD=(d,n)=>{const x=new Date(d+'T12:00');x.setDate(x.getDate()+n);return x.toLocaleDateString('sv')};
+const ddf=(a,b)=>Math.round((new Date(b+'T12:00')-new Date(a+'T12:00'))/864e5);
+const rgba=(h,a)=>{h=h.replace('#','');return `rgba(${parseInt(h.slice(0,2),16)},${parseInt(h.slice(2,4),16)},${parseInt(h.slice(4,6),16)},${a})`};
+function cstat(){const P=arr('period').filter(p=>p.start).sort((a,b)=>a.start.localeCompare(b.start));if(!P.length)return null;
+ const avg=a=>a.length?a.reduce((s,x)=>s+x,0)/a.length:null,gp=P.slice(1).map((p,i)=>ddf(P[i].start,p.start)).slice(-6),
+ cl=Math.round(avg(gp)||28),pl=Math.round(avg(P.filter(p=>p.end).map(p=>ddf(p.start,p.end)+1).slice(-6))||5),
+ ov=Math.max(pl+1,Math.round(cl/2)),ps=Math.max(ov+2,cl-6);return{P,cl,pl,ov,ps}}
+function calInfo(d,C,t){if(!C)return{};
+ const o=C.P.find(p=>d>=p.start&&d<=(p.end||(p.start<=t?t:p.start)));
+ if(o)return{logged:1,ph:'menstrual',day:ddf(o.start,d)+1};
+ let cs=C.P[C.P.length-1].start;
+ if(d>=cs){while(addD(cs,C.cl)<=d)cs=addD(cs,C.cl)}else{do{cs=addD(cs,-C.cl)}while(cs>d)}
+ const day=ddf(cs,d)+1;return{ph:phd(day,C),day,pred:day<=C.pl}}
+function calView(){const t=today(),C=cstat();if(!CALM)CALM=t.slice(0,7);
+ const [y,m]=CALM.split('-').map(Number),dim=new Date(y,m,0).getDate(),fow=(new Date(y,m-1,1).getDay()+6)%7,
+ hasM={};moodArr().forEach(e=>{if(e.date&&(e.mood||e.energy||e.sleep||e.sleepHours||(e.symptoms||[]).length))hasM[e.date]=1});
+ const rd={};arr('log').forEach(x=>{const k=dk(x.date);(rd[k]=rd[k]||[]).push(x)});
+ let g=['M','T','W','T','F','S','S'].map(x=>`<div class=dh>${x}</div>`).join('')+'<div></div>'.repeat(fow);
+ for(let i=1;i<=dim;i++){const d=`${CALM}-${String(i).padStart(2,'0')}`,f=calInfo(d,C,t);
+  let bg='transparent',bd='1px solid transparent',col='',ti='';
+  if(f.logged){bg=PC.menstrual;col='#171117';ti='Logged period'}
+  else if(f.pred){bd=`1px dashed ${PC.menstrual}`;col=PC.menstrual;ti='Predicted period'}
+  else if(f.ph){bg=rgba(PC[f.ph],.18);ti=PH[f.ph][1]}
+  if(rd[d])ti+=(ti?' · ':'')+rd[d].length+' fic'+(rd[d].length>1?'s':'')+' read';
+  g+=`<button data-a=cal-d data-d=${d} title="${esc(ti)}" class="cd${d===t?' tdy':''}${d===CSEL?' sel':''}" style="background:${bg};border:${bd};${col?'color:'+col:''}">${i}${f.day?`<small>d${f.day}</small>`:''}${rd[d]?`<u style="right:2px;${f.logged?'background:#171117':''}"></u>`:''}${hasM[d]?'<u style="left:2px"></u>':''}</button>`}
+ const lg=[['Logged period',PC.menstrual,''],['Predicted period','transparent',`border:1px dashed ${PC.menstrual}`],...['follicular','ovulatory','luteal','pms'].map(k=>[PH[k][1],rgba(PC[k],.5),''])];
+ return `<div class=cn><button data-a=cal-p>‹</button><b>${new Date(y,m-1,1).toLocaleDateString(undefined,{month:'long',year:'numeric'})}</b><button data-a=cal-n>›</button></div>`
+  +(C?'':'<p class=empty>Log a period start to see phases on the calendar.</p>')
+  +`<div class=cgd>${g}</div><div class=cleg>${lg.map(([l,c,x])=>`<span><i style="background:${c};${x}"></i>${l}</span>`).join('')}<span><i style="background:var(--p2)"></i>mood logged (left) · fic read (right)</span></div>`+calDetail(C,t)}
+function calDetail(C,t){if(!CSEL)return'';const d=CSEL,f=calInfo(d,C,t),e=ent(d),L=arr('log').filter(x=>dk(x.date)===d).sort((a,b)=>a.date.localeCompare(b.date));
+ const bits=[e.mood&&'Mood '+e.mood+'/5',e.energy&&'Energy '+e.energy+'/5',e.sleep&&'Sleep '+e.sleep+'/5',e.sleepHours&&'Slept '+SHR[e.sleepHours-1]+' hrs',typeof e.orgasmCount==='number'?'Orgasms: '+e.orgasmCount:typeof e.orgasm==='boolean'?'Orgasm: '+(e.orgasm?'Yes':'No'):null,e.sick&&'🤒 sick'].filter(Boolean);
+ return `<div class=cdet><div class=t>${esc(new Date(d+'T12:00').toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'}))}</div>`
+  +(f.ph?`<div class=m>${PH[f.ph][0]} Day ${f.day} · ${PH[f.ph][1]}${f.logged?' · logged period':f.pred?' · predicted period':d>t?' · predicted':''}</div>`:'')
+  +(bits.length?`<div class=m style="opacity:.85">${esc(bits.join(' · '))}</div>`:'')
+  +((e.symptoms||[]).length?`<div class=chips style="margin-top:6px">${e.symptoms.map(s=>`<span class=b>${SI[s]||'•'} ${esc(s)}</span>`).join('')}</div>`:'')
+  +L.map(x=>`<div class=row style="margin-top:8px"><div><span class=t>${x.url?`<a href="${esc(x.url)}" target=_blank rel=noopener>${esc(x.title)}</a>`:esc(x.title)}</span><div class=m>${sp(x.chapter,fmt(x.words)+' words')}</div></div></div>`).join('')
+  +(!bits.length&&!(e.symptoms||[]).length&&!L.length?'<div class=m>Nothing logged this day.</div>':'')
+  +(d<=t?`<div style="margin-top:10px"><button class=pri data-a=cal-l data-d=${d}>Edit this day ↑</button></div>`:'')+'</div>'}
+function calBox(){return dt('ca','📅 Calendar',calView())}
+OPEN.ca=true;
+function drawCal(){const el=$('#calv');if(el)el.innerHTML=calBox()}
+
+const sleepMid=v=>{const r=SHR[v-1];if(!r)return null;if(r.endsWith('+'))return parseFloat(r);const[a,b]=r.split('-').map(Number);return(a+b)/2};
+const topK=o=>{const e=Object.entries(o||{}).sort((a,b)=>b[1]-a[1]);return e.length?e[0][0]:null};
+const grid=a=>`<div class=cg style="grid-template-columns:repeat(2,1fr)">${a.filter(Boolean).map(([l,v])=>`<div><b style="font-size:14px">${v}</b><small>${l}</small></div>`).join('')}</div>`;
+const note2=t=>`<div class=sv style="line-height:1.4">${t}</div>`;
+function sleepStats(){const t=today(),s0=addD(t,-6);let tot=0,n=0;moodArr().forEach(e=>{if(e.date<s0||e.date>t||typeof e.sleepHours!=='number')return;const m=sleepMid(e.sleepHours);if(m==null)return;tot+=m;n++});
+ if(!n)return'';const avg=tot/n,d=avg-8.5,wd=tot-59.5,sg=(x,e)=>Math.abs(x)<e?'Right on target':`${x>0?'↑':'↓'} ${Math.abs(x).toFixed(1)} hrs ${x>0?'over':'under'}`;
+ return det('😴 Sleep stats',grid([['Slept, past 7 days',tot.toFixed(1)+' hrs'],['Avg. per night',avg.toFixed(1)+' hrs'],['Your ideal','8-9 hrs/night'],['Vs. ideal (per night)',sg(d,.05)],['Weekly total vs. ideal',tot.toFixed(1)+' / 60 hrs'],['Vs. ideal (week)',sg(wd,.3)]])+note2(`Based on ${n} night${n>1?'s':''} logged in the last 7 days. Each night uses the midpoint of the logged range.`))}
+function ficStats(){const L=arr('log');if(!L.length)return'';const w=L.reduce((s,x)=>s+(x.words||0),0),u=new Set(L.map(x=>x.key?x.key.split('::')[0]:x.title)),fd2={};let lg=null;
+ L.forEach(x=>{(x.fandoms||[]).forEach(f=>fd2[f]=(fd2[f]||0)+1);if(!lg||(x.words||0)>(lg.words||0))lg=x});
+ return det('📚 Fic stats',grid([['Fics logged',fmt(u.size)],['Total sessions',fmt(L.length)],['Words read',fmt(w)],['Avg. words/session',fmt(Math.round(w/L.length))],lg&&['Longest session',fmt(lg.words||0)+' words'],topK(fd2)&&['Top fandom',esc(topK(fd2))]]))}
+function phaseStats(){const P=arr('period').filter(p=>p.start).sort((a,b)=>a.start.localeCompare(b.start)),L=arr('log');if(!P.length||!L.length)return'';
+ const B={},M={},T={},K0=Object.keys(PH);K0.forEach(k=>{B[k]={n:0,w:0,fd:{},rt:{}};M[k]={m:[0,0],en:[0,0],sl:[0,0],sy:{}};T[k]=0});
+ L.forEach(x=>{const c=cyc(dk(x.date));if(!c)return;const b=B[c.ph];b.n++;b.w+=x.words||0;(x.fandoms||[]).forEach(f=>b.fd[f]=(b.fd[f]||0)+1);if(x.rating)b.rt[x.rating]=(b.rt[x.rating]||0)+1});
+ moodArr().forEach(e=>{const c=cyc(e.date);if(!c)return;const m=M[c.ph];[['mood','m'],['energy','en'],['sleep','sl']].forEach(([k,a])=>{if(typeof e[k]==='number'){m[a][0]+=e[k];m[a][1]++}});(e.symptoms||[]).forEach(y=>m.sy[y]=(m.sy[y]||0)+1)});
+ for(let d=P[0].start,t=today();d<=t;d=addD(d,1)){const c=cyc(d);if(c)T[c.ph]++}
+ if(!K0.some(k=>B[k].n))return det('🌙 By cycle phase','<p class=empty>Not enough overlapping data yet between your reading log and period log.</p>');
+ const av=a=>a[1]?(a[0]/a[1]).toFixed(1):null;
+ return det('🌙 By cycle phase',K0.map(k=>{const b=B[k],m=M[k],dy=T[k],tf=topK(b.fd),tr=topK(b.rt),ts=topK(m.sy),
+  ch=[`📚 ${fmt(dy?Math.round(b.w/dy):0)} words/day`,`📖 ${(dy?b.n/dy:0).toFixed(2)} sessions/day`,`avg ${fmt(b.n?Math.round(b.w/b.n):0)}/session`,tf&&'💕 '+esc(tf),tr&&esc(tr),av(m.m)&&`😊 mood ${av(m.m)}/5`,av(m.en)&&`⚡ energy ${av(m.en)}/5`,av(m.sl)&&`😴 sleep ${av(m.sl)}/5`,ts&&`${SI[ts]||'•'} ${esc(ts)}`].filter(Boolean);
+  return `<div class=row style="border-left:3px solid ${PC[k]};flex-direction:column;gap:6px"><div style="display:flex;justify-content:space-between;width:100%"><b style="color:${PC[k]}">${PH[k][0]} ${PH[k][1]}</b><span class=m>${dy} day${dy===1?'':'s'} tracked</span></div><div class=m style="display:flex;flex-wrap:wrap;gap:4px 12px;opacity:.85">${ch.map(c=>`<span>${c}</span>`).join('')}</div></div>`}).join('')
+  +note2('Totals are raw; the /day figures are normalized for how many days each phase spans (PMS = last days before your predicted period). Phases are estimates, not a diagnosis.'))}
+function lifeStats(){const P=arr('period').filter(p=>p.start).sort((a,b)=>a.start.localeCompare(b.start));if(!P.length)return'';const t=today(),avg=a=>a.length?a.reduce((s,x)=>s+x,0)/a.length:null;
+ let td=0;P.forEach(p=>td+=ddf(p.start,p.end||t)+1);const cl=P.slice(1).map((p,i)=>ddf(P[i].start,p.start)),a=avg(cl),dv=cl.length&&a?avg(cl.map(x=>Math.abs(x-a))):null;
+ let pw=0,ps=0;arr('log').forEach(x=>{const k=dk(x.date);if(P.some(p=>k>=p.start&&k<=(p.end||t))){pw+=x.words||0;ps++}});
+ return det('⏳ Lifetime stats',grid([['Longest cycle',cl.length?Math.max(...cl)+' days':'—'],['Shortest cycle',cl.length?Math.min(...cl)+' days':'—'],['Avg. deviation',dv!=null?'±'+dv.toFixed(1)+' days':'—'],['Total period days',fmt(td)+' days'],['Reading during periods',pw?`${fmt(pw)} words (${rt(pw)})`:'—'],['Sessions during periods',fmt(ps)]])+note2(`Based on ${cl.length} logged cycle${cl.length===1?'':'s'}. "During periods" counts reading sessions that fall inside a logged period.`))}
+function cycHistory(){const A=arr('period').map((x,i)=>({x,i})).filter(o=>o.x.start).sort((a,b)=>a.x.start.localeCompare(b.x.start));
+ const cl=A.slice(1).map((o,i)=>ddf(A[i].x.start,o.x.start)).slice(-6),avg=cl.length?cl.reduce((s,x)=>s+x,0)/cl.length:null;
+ const cards=A.map((o,k)=>{const nx=A[k+1],len=nx?ddf(o.x.start,nx.x.start):null,pl=o.x.end?ddf(o.x.start,o.x.end)+1:null;let bd='';
+  if(len!=null&&avg){const d=len-avg,[tx,c]=Math.abs(d)<1?['avg','#ffeaf4']:d>0?[`+${Math.round(d)}d longer`,'#ffb37a']:[`${Math.round(d)}d shorter`,'#8fd6ff'];bd=`<span class=b style="color:${c}">${tx}</span>`}
+  return `<div class=row style="flex-direction:column;gap:4px"><div style="display:flex;justify-content:space-between;align-items:center;width:100%"><b>Cycle ${k+1} — ${len!=null?len+'d':'ongoing'}</b>${bd}</div><div class=m>${fd(o.x.start)} – ${o.x.end?fd(o.x.end):'…'} · ${pl!=null?pl+'d period':'period ongoing'}</div>${o.x.notes?`<div class=m style="font-style:italic">📝 ${esc(o.x.notes)}</div>`:''}<div style="display:flex;gap:6px;margin-top:2px">${o.x.end?'':`<button data-a=per-end data-i=${o.i}>End today</button>`}<button data-a=edit data-t=period data-i=${o.i}>Edit / add note</button></div></div>`}).reverse().join('');
+ return `<div class=bar2><span style="flex:1" class=lbl>Cycle history</span><button class=pri data-a=add data-t=period>Add</button></div>`+(cards||'<p class=empty>Nothing logged yet.</p>')}
+function periodView(){return sleepStats()+ficStats()+phaseStats()+lifeStats()+cycHistory()}
+
 async function load(){const {data,error}=await sb.from('ao3_sync').select('key,value,updated_at');
  if(error)msg=error.message;else{rows={};data.forEach(r=>rows[r.key]=r);}draw();}
 async function persist(key,value){const r=rows[key];let res;
@@ -266,7 +349,7 @@ function draw(){const el=$('#app');
  if(!session){el.innerHTML=`<form id=login class=login><h1>Reading Dashboard</h1>${msg?`<p class=msg>${esc(msg)}</p>`:''}<label>Email<input name=email type=email required></label><label>Password<input name=pw type=password required></label><button class=pri>Sign in</button></form>`;return;}
  if(!F.m)F.m=today().slice(0,7);
  const T=[['log','Today'],['read','Reading'],['fics','Fics'],['mood','Mood'],['period','Period'],['raw','Raw data']];
- el.innerHTML=`<div class=modal><div class=top><div><b>Reading Dashboard</b><span class=h>♡</span></div><div><button data-a=refresh>Refresh</button> <button data-a=out>Sign out</button></div></div><div class=body><nav class=tabs>${T.map(([k,l])=>`<button class=tab data-a=tab data-t=${k} aria-selected=${tab===k}>${l}</button>`).join('')}</nav>${msg?`<p class=msg>${esc(msg)}</p>`:''}${tab==='log'?'<div id=logv>'+logView()+'</div><div id=logl>'+letterView()+'</div>':tab==='raw'?rawView():tab==='read'?readView():listView()}</div></div>`;}
+ el.innerHTML=`<div class=modal><div class=top><div><b>Reading Dashboard</b><span class=h>♡</span></div><div><button data-a=refresh>Refresh</button> <button data-a=out>Sign out</button></div></div><div class=body><nav class=tabs>${T.map(([k,l])=>`<button class=tab data-a=tab data-t=${k} aria-selected=${tab===k}>${l}</button>`).join('')}</nav>${msg?`<p class=msg>${esc(msg)}</p>`:''}${tab==='log'?'<div id=logv>'+logView()+'</div><div id=calv>'+calBox()+'</div><div id=logl>'+letterView()+'</div>':tab==='raw'?rawView():tab==='read'?readView():tab==='period'?periodView():listView()}</div></div>`;}
 
 function edit(t,i){cur={t,i};const o=i<0?{}:arr(t)[i]||{};
  $('#dlg form').innerHTML=`<h2>${i<0?'Add':'Edit'}</h2>`+S[t].map(([n,l,ty])=>`<label>${l}`+(ty==='check'?`<input type=checkbox name=${n} ${o[n]?'checked':''}>`:`<input name=${n} type=${ty==='list'?'text':ty} value="${esc(ty==='list'?(o[n]||[]).join(', '):ty==='date'?String(o[n]??'').slice(0,10):o[n])}">`)+'</label>').join('')
@@ -289,6 +372,10 @@ async function save(form){const fd=new FormData(form);
  commit(t,a);}
 
 document.addEventListener('click',async e=>{const b=e.target.closest('[data-a]');if(!b)return;const a=b.dataset.a;if(a.startsWith('lg-'))return logAct(b);
+ if(a==='cal-p'||a==='cal-n'){const[y,m]=CALM.split('-').map(Number),x=new Date(y,m-1+(a==='cal-n'?1:-1),1);CALM=x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0');return drawCal()}
+ if(a==='cal-d'){const d=b.dataset.d;CSEL=CSEL===d?null:d;if(CSEL&&d<=today()){LD=d;WK=null;drawLetter();return drawLog()}return drawCal()}
+ if(a==='cal-l'){const el=$('#logv');return el&&el.scrollIntoView({behavior:'smooth'})}
+ if(a==='per-end'){const x=arr('period').map(o=>({...o})),i=+b.dataset.i;x[i].end=today();return commit('period',x)}
  if(a==='tab'){tab=b.dataset.t;more=80;msg='';draw();}
  else if(a==='edit')edit(b.dataset.t,+b.dataset.i);else if(a==='add')edit(b.dataset.t,-1);
  else if(a==='raw')editRaw(b.dataset.k);else if(a==='more'){more+=80;draw();}

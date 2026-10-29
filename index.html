@@ -86,7 +86,7 @@ function logRow(x){const n=((x.chapter||'').match(/^(\d+)\./)||[])[1];
 const SG=[["Pain & physical","Cramps,Pre-period cramps,Ovulation pain,Spasms,Headache,Tender breasts,Bloating,Muscle aches,PMS flu,Spotting"],["Skin & body","Acne,Oily hair,Watery discharge,Sweating,Hot flashes,Dry eyes,Eye strain"],["Energy & appetite","Fatigue,Hungry,Small appetite,Cravings,Craving chocolate,Vivid dreams,Nesting"],["Mood & mind","Emotional,Irritable,Anxiety,Overthinking,Self critical,Hopelessness,PMDD,Calm,Confident,Feeling okay,Hating men,Taking it personally,Over it,Sad"],["Social & libido","Sociable,Solitary,Flirty,High libido,Low libido"]].map(([n,s])=>[n,s.split(',')]);
 const SI={"Cramps":"😣","Pre-period cramps":"😖","Ovulation pain":"🥚","Spasms":"💢","Headache":"🤕","Tender breasts":"🩹","Bloating":"🎈","Muscle aches":"💪","PMS flu":"🤧","Spotting":"🩸","Acne":"🔴","Oily hair":"🧴","Watery discharge":"💧","Sweating":"💦","Hot flashes":"🥵","Dry eyes":"🏜️","Eye strain":"👀","Fatigue":"🥱","Hungry":"🍔","Small appetite":"🍽️","Cravings":"🍕","Craving chocolate":"🍫","Vivid dreams":"🔮","Nesting":"🧺","Emotional":"☁️","Irritable":"😤","Anxiety":"🌀","Overthinking":"🧠","Self critical":"🪞","Hopelessness":"🥀","PMDD":"🌪️","Calm":"🎐","Confident":"💅","Feeling okay":"🎀","Hating men":"🤹‍♂️","Taking it personally":"🎯","Over it":"🙄","Sad":"😢","Sociable":"🍹","Solitary":"🚪","Flirty":"😏","High libido":"🔥","Low libido":"🧊"};
 const SHR=["1-2","3-4","4-5","5-6","6-7","7-8","8-9","9-10","10-11","11-12","12-13","13+"];
-const PH={menstrual:['🩸','Menstrual'],follicular:['🌱','Follicular'],ovulatory:['🌕','Ovulatory'],luteal:['🍂','Luteal'],pms:['🌸','PMS']};
+const PH={menstrual:['🩸','Menstrual'],follicular:['🌱','Follicular'],ovulatory:['🌕','Ovulatory'],luteal:['🌙','Luteal'],pms:['🌸','PMS']};
 let LD=null,pend=[],busy=false;
 function apply(a,d,ch){const i=a.findIndex(e=>e.date===d),o={...(i<0?{date:d}:a[i]),...ch};Object.keys(o).forEach(k=>o[k]===undefined&&delete o[k]);i<0?a.push(o):a[i]=o}
 const moodArr=()=>{const a=arr('mood').map(e=>({...e}));pend.forEach(([d,ch])=>apply(a,d,ch));return a};
@@ -105,20 +105,20 @@ function cyc(d){const P=arr('period').filter(p=>p.start).sort((a,b)=>a.start.loc
  const day=dd(o.start,d)+1;if(day>cl+10)return null;
  const ov=Math.max(pl+1,Math.round(cl/2)),ps=Math.max(ov+2,cl-6),ph=day<=pl?'menstrual':day>=ps?'pms':day<ov-1?'follicular':day<=ov+1?'ovulatory':'luteal';
  const nx=new Date(o.start+'T12:00');nx.setDate(nx.getDate()+cl);
- return{day,ph,o,cl,pl,ov,ps,dev,n:gp.length,next:nx.toLocaleDateString('sv'),on:!o.end||d<=o.end}}
+ return{day,ph,o,cl,pl,ov,ps,dev,avg:ga,gp,n:gp.length,next:nx.toLocaleDateString('sv'),on:!o.end||d<=o.end}}
 function logView(){const t=today();if(!LD||LD>t)LD=t;const e=ent(LD),c=cyc(LD),sy=new Set(e.symptoms||[]),o=e.orgasm,
  B=(a,x,on,tx)=>`<button data-a=${a} ${x} class="${on?'pri':''}">${tx}</button>`,
  sc=(k,l,lo,hi)=>`<div class=lbl>${l}</div><div class=sc>${[1,2,3,4,5].map(v=>B('lg-s',`data-k=${k} data-v=${v}`,e[k]===v,v)).join('')}</div><div class=sv style="display:flex;justify-content:space-between"><span>${lo}</span><span>${hi}</span></div>`,
  per=c&&c.on&&!c.o.end?'end':'start';
  return `<div class=lgh><input type=date id=lgd value="${LD}" max="${t}">${LD!==t?B('lg-t','',0,'Today'):''}<span class=sv>${busy||pend.length?'saving…':'saved ✓'}</span></div>`
- +`<div class=cy><div>${c?`<b>${PH[c.ph][0]} Day ${c.day} · ${PH[c.ph][1]}</b><div class=m>${LD===t?'next period ~'+c.next:'cycle position that day'}</div>`:'<b>No cycle day yet</b><div class=m>Log a period start to begin</div>'}</div>${B('lg-p','data-v='+per,0,per==='end'?'Period ended':'Period started')}</div>`
+ +`<div style="display:flex;justify-content:flex-end;margin:-4px 0 12px">${B('lg-p','data-v='+per,0,per==='end'?'Period ended':'Period started')}</div>`+overviewCard(c)+upcomingCard(c)
  +dayScoreRow(c)+companion(c)
  +B('lg-k','',e.sick,e.sick?'🤒 Sick day (tap to undo)':'🤒 I was sick this day')
  +sc('mood','Mood','low','great')+sc('energy','Energy','drained','buzzing')+sc('sleep','Sleep quality','rough','restful')
  +`<div class=lbl>Hours slept</div><select id=lgh><option value="">—</option>${SHR.map((r,i)=>`<option value=${i+1}${e.sleepHours===i+1?' selected':''}>${r} hrs</option>`).join('')}</select>`
  +`<div class=lbl>Orgasm</div><div class=two>${B('lg-o','data-v=y',o===true,'Yes')}${B('lg-o','data-v=n',o===false,'No')}${o===true?B('lg-c','data-d=-1',0,'−')+`<b>${e.orgasmCount||1}</b>`+B('lg-c','data-d=1',0,'+'):''}</div>`
  +SG.map(([n,l])=>`<div class=lbl>${n}</div><div class=chips>${l.map(s=>B('lg-y',`data-s="${s}"`,sy.has(s),(SI[s]||'•')+' '+s).replace('class="','class="ch ')).join('')}</div>`).join('')
- +note(c)+dt('cy','🌙 Cycle overview',cycPanel(c))+dt('hd','📅 On this cycle day',c?hist(c.day,c,LD):'<p class=empty>Log a period first.</p>')}
+ +note(c)+dt('hd','📅 On this cycle day',c?hist(c.day,c,LD):'<p class=empty>Log a period first.</p>')}
 async function lgPer(kind){const a=arr('period').map(x=>({...x}));
  if(kind==='start'){if(a.some(p=>p.start===LD))return;a.push({id:'p_'+Date.now(),start:LD})}
  else{const o=a.filter(p=>!p.end).sort((x,y)=>y.start.localeCompare(x.start))[0];if(!o||o.start>LD)return;o.end=LD}
@@ -134,10 +134,12 @@ function logAct(b){const a=b.dataset.a,d=b.dataset,e=ent(LD);
  else if(a==='lg-w'){WK=WK===+d.d?null:+d.d;drawLog()}
  else if(a==='lg-q'){QO++;drawLog()}
  else if(a==='lg-h')pet()
+ else if(a==='lg-x'){OPEN.wk=!OPEN.wk;drawLog()}
+ else if(a==='lg-g'){OPEN.ch=!OPEN.ch;drawLog()}
  else if(a==='lg-p')lgPer(d.v)}
 
 
-const OPEN={},PC={menstrual:'#ff7a9c',follicular:'#a3be8c',ovulatory:'#f6c177',luteal:'#c4a7e7',pms:'#ff9ecf'},LK='ao3_cycle_letters_v1';
+const OPEN={},PC={menstrual:'#ff6b8a',follicular:'#9ccfd8',ovulatory:'#f6c177',luteal:'#c4a7e7',pms:'#ff9f5a'},LK='ao3_cycle_letters_v1';
 const TXT={menstrual:["It's okay if today is just survivable. Survivable is still a form of winning.","Rest isn't something you have to earn back later. It's allowed right now.","Heat applied early beats waiting for the cramps to peak.","Iron dips this week: lentils, greens or red meat help."],
 follicular:["You've got a little spark back. Spend it on something that interests you.","Today's a fine day to start something instead of adding it to the list.","Energy tends to climb from here, so front-load the annoying tasks.","Small sparks of 'I want to' are worth following."],
 ovulatory:["Some days you're just easier to be around, even to yourself. Today's one of them.","Social energy often peaks here. A decent window for plans you've been putting off.","Warm up a little longer before anything intense; ligaments loosen around ovulation.","You can be a lot today, in the good way."],
@@ -216,6 +218,32 @@ async function pet(){if(petBusy)return;petBusy=true;const m={pets:0,lastPetDate:
  m.pets=(m.pets||0)+1;const c=cyc(today()),pool=CMSG[c?c.ph:'follicular'];
  CM=ms?`celebrates your ${m.streak}-day streak. it's a big deal to it.`:pool[Math.floor(Math.random()*pool.length)];drawLog();
  try{await persist(CK,m)}catch(e){msg=e.message;draw()}petBusy=false;drawLog()}
+
+
+const rgba=(h,a)=>{const n=parseInt(h.slice(1),16);return `rgba(${n>>16},${n>>8&255},${n&255},${a})`};
+function overviewCard(c){
+ if(!c)return '<div style="border:1px solid rgba(255,158,207,.25);border-radius:12px;padding:16px;background:rgba(255,158,207,.04);color:rgba(255,234,244,.55);font-size:13px;margin-bottom:10px">No entries logged yet — tap “Period started” above to add your first period.</div>';
+ const col=PC[c.ph],past=LD!==today(),nt=(()=>{for(let k=1;k<=c.cl;k++){const q=phd(c.day+k,c);if(q!==c.ph)return[q,k]}})(),nl=nt?(nt[0]==='menstrual'?'Period':PH[nt[0]][1]):null,
+ tile=(v,l,sz,act)=>`<div ${act?`data-a=${act} `:''}style="border-radius:10px;padding:11px 6px;text-align:center;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;min-height:70px;min-width:0;background:linear-gradient(160deg,${rgba(col,.11)},${rgba(col,.03)});border:1px solid ${rgba(col,.22)};${act?'cursor:pointer;user-select:none;':''}"><div style="font-size:${sz}px;font-weight:700;color:#ffeaf4;line-height:1.2;letter-spacing:-.01em;max-width:100%">${v}</div><div style="font-size:9px;font-weight:600;color:${rgba(col,.8)};text-transform:uppercase;letter-spacing:.06em;max-width:100%">${l}</div></div>`;
+ let h=`<div style="border:1px solid ${rgba(col,.45)};border-radius:12px;padding:16px;background:linear-gradient(160deg,${rgba(col,.14)},${rgba(col,.03)});display:flex;flex-direction:column;gap:14px;margin-bottom:10px">`
+ +`<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap"><div style="display:flex;align-items:baseline;gap:6px;font-weight:700;font-size:16px;color:${col}"><span style="opacity:${past?.55:1}">${PH[c.ph][0]}</span><span>Day ${c.day}</span><span style="opacity:.65">·</span><span>${PH[c.ph][1]}${past?' · '+esc(LD):''}</span></div>${c.on&&!past?`<span style="border:1px solid ${rgba(col,.5)};border-radius:999px;padding:2px 10px;font-size:10px;font-weight:600;color:${col}">on period</span>`:''}</div>`
+ +`<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px">${tile(fd(c.next),'Next period',18,'lg-x')}${tile(c.avg?c.avg.toFixed(1)+'d':'—','Avg. cycle',18,c.gp.length?'lg-g':'')}${tile(nt?nt[1]+'d':'—',nt?'Until '+nl:'Next phase',18,'')}</div>`;
+ if(OPEN.wk){const runs=[];for(let i=1;i<=c.cl;i++){const q=phd(i,c),l=runs[runs.length-1];l&&l[0]===q?l[1]++:runs.push([q,1])},
+  pct=Math.min(98,Math.max(2,((((c.day-1)%c.cl)+.5)/c.cl)*100));
+  h+=`<div style="display:flex;flex-direction:column;gap:5px"><div style="font-size:9.5px;font-weight:600;color:rgba(255,234,244,.5);text-transform:uppercase;letter-spacing:.05em">Where you are in your cycle</div><div style="position:relative;display:flex;height:10px;border-radius:5px;overflow:hidden">${runs.map(([q,n])=>`<div style="flex:${n} 0 0;background:${rgba(PC[q],.55)}"></div>`).join('')}<div style="position:absolute;top:-2px;left:${pct}%;width:2px;height:14px;background:#fff;border-radius:1px;box-shadow:0 0 4px rgba(255,255,255,.85);transform:translateX(-1px)"></div></div></div>`
+  +`<div style="display:flex;justify-content:center;gap:4px">${[0,1,2,3,4,5,6].map(d=>{const q=phd(c.day+d,c),k=PC[q],x=new Date(LD+'T12:00');x.setDate(x.getDate()+d);return `<div data-a=lg-w data-d=${d} style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:5px 2px;border-radius:9px;cursor:pointer;user-select:none;background:${rgba(k,d===0?.22:.11)};border:1px solid ${rgba(k,d===0?.55:.22)}"><div style="font-size:8.5px;font-weight:700;letter-spacing:.02em;text-transform:uppercase;color:${rgba(k,.9)}">${d===0?'today':x.toLocaleDateString(undefined,{weekday:'short'}).slice(0,2)}</div><div style="font-size:14px;line-height:1">${PH[q][0]}</div></div>`}).join('')}</div>`
+  +(WK!=null?`<div style="border-top:1px solid ${rgba(col,.2)};padding-top:10px">${hist(c.day+WK,c,LD)}</div>`:'');}
+ if(OPEN.ch){const mx=Math.max(...c.gp);h+=`<div><div style="font-size:9.5px;font-weight:600;color:rgba(255,234,244,.5);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Recent cycle lengths</div><div style="display:flex;align-items:flex-end;gap:6px;height:56px">${c.gp.map(g=>`<div style="flex:1;text-align:center;font-size:9px;color:rgba(255,234,244,.6)"><div style="height:${Math.round(g/mx*38)}px;background:${rgba(col,.55)};border-radius:3px 3px 0 0;margin-bottom:2px"></div>${g}d</div>`).join('')}</div></div>`}
+ return h+'</div>'}
+function upcomingCard(c){if(!c)return'';const w=x=>x<0?x+c.cl:x,
+ T=[['🩸','Next period',c.cl+1-c.day,PC.menstrual],['🌸','Expected PMS',w(c.ps-c.day),PC.pms],['🌕','Ovulation',w(c.ov-c.day),PC.ovulatory]].sort((a,b)=>a[2]-b[2]),
+ cell=([i,l,n,k])=>`<div style="border-radius:8px;padding:8px 6px;text-align:center;min-width:0;overflow:hidden;background:${rgba(k,.1)};border:1px solid ${rgba(k,.3)}"><div style="font-size:18px;font-weight:700;color:${k}">${n<=0?'Today':n+'d'}</div><div style="font-size:10px;color:rgba(255,234,244,.6);margin-top:2px">${i} ${l}</div></div>`;
+ let h=`<div style="border:1px solid rgba(255,158,207,.25);border-radius:10px;padding:14px;background:rgba(255,158,207,.04);display:flex;flex-direction:column;gap:10px;margin-bottom:10px"><div style="font-size:11px;color:rgba(255,234,244,.55);text-transform:uppercase;letter-spacing:.04em">Upcoming</div><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;overflow:hidden">${T.map(cell).join('')}</div>`;
+ if(c.dev!=null){const sp=Math.max(1,Math.round(c.dev)),sh=n=>{const x=new Date(c.next+'T12:00');x.setDate(x.getDate()+n);return fd(x.toLocaleDateString('sv'))},
+  cf=c.n<2?['Low','#ff9e9e']:c.n>=4&&c.dev<=1.5?['High','#a3e6b0']:c.dev<=3.5?['Moderate','#ffd27a']:['Low','#ff9e9e'],
+  ln=(a,b,k)=>`<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:12px"><span style="color:rgba(255,234,244,.55)">${a}</span><span style="font-weight:700;color:${k||'#ffeaf4'}">${b}</span></div>`;
+  h+=`<div style="display:flex;flex-direction:column;gap:4px;padding-top:10px;border-top:1px solid rgba(255,158,207,.15)">${ln('Expected',fd(c.next))}${ln('Likely window',sh(-sp)+' – '+sh(sp))}${ln('Confidence',cf[0],cf[1])}<div style="font-size:10.5px;color:rgba(255,234,244,.4);margin-top:2px">Your recent ${c.n} cycle${c.n===1?'':'s'} vary by ±${c.dev.toFixed(1)} days.</div></div>`}
+ return h+'</div>'}
 
 async function load(){const {data,error}=await sb.from('ao3_sync').select('key,value,updated_at');
  if(error)msg=error.message;else{rows={};data.forEach(r=>rows[r.key]=r);}draw();}

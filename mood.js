@@ -36,6 +36,17 @@ const TITLE_PHRASES = {
 function symptomIcon(symptom) { return SI[symptom] || "•"; } // userscript uses SYMPTOM_ICONS (same map as the web app's SI)
 
 
+// Saves (or, with empty text, clears) your own title for a cycle day. Reads live in
+// storage.js (getCycleDayTitles). Only the write differs from the userscript: it goes
+// through persist() to the TITLES_KEY row instead of localStorage.setItem, so it is
+// async (await it).
+async function setCycleDayTitle(day, text) {
+  const all = { ...getCycleDayTitles() };
+  const t = String(text || "").trim();
+  if (t) all[day] = t; else delete all[day];
+  await persist(TITLES_KEY, all);
+}
+
 function getCycleDayTags(day, stats) {
   const { cycleLen, ovulationDay, pmsStart } = getCycleMarkers(stats.avgCycle, stats.avgPeriod);
   const tags = [];
@@ -170,6 +181,91 @@ function getCycleDayTitle(day, stats, buckets, baseline) {
   const parts = buildAutoCycleDayTitleParts(day, b, baseline || getOverallMoodBaseline(), stats || getPeriodStats());
   const text = parts.empty || [...parts.tags, parts.items.map(i => i.label).join(", ")].filter(Boolean).join(" · ");
   return { text, custom: false, ...parts };
+}
+
+// The title as a row of soft chips, styled like the score pill / meters
+// in the card it sits in: heads-up tags as brighter "✦ … ✦" pills,
+// symptoms and mood/sleep notes as quieter icon chips, your own title as
+// one slightly larger chip.
+function buildCycleDayTitleChips(t, accent, opts = {}) {
+  const left = !!opts.left, sm = !!opts.compact;
+  const row = document.createElement("div");
+  row.style.cssText = `display:flex; flex-wrap:wrap; justify-content:${left ? "flex-start" : "center"}; align-items:center; gap:${sm ? 5 : 6}px; margin:${left ? "0" : "2px 2px 6px"};`;
+  const chip = (text, icon, css) => {
+    const el = document.createElement("span");
+    el.style.cssText = `display:inline-flex; align-items:center; gap:5px; border-radius:999px; line-height:1.2; ${css}`;
+    if (icon) {
+      const i = document.createElement("span");
+      i.textContent = icon;
+      i.style.cssText = "font-size:12px;";
+      el.appendChild(i);
+    }
+    const tx = document.createElement("span");
+    tx.textContent = text;
+    el.appendChild(tx);
+    return el;
+  };
+  const tagCss = `padding:${sm ? "3px 9px" : "4px 11px"}; font-size:${sm ? 9.5 : 10}px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase;
+    color:${accent}; background:${hexToRgba(accent, 0.18)}; border:1px solid ${hexToRgba(accent, 0.5)};`;
+  const itemCss = `padding:${sm ? "2px 9px" : "3px 10px"}; font-size:${sm ? 11 : 11.5}px; font-weight:500; color:rgba(255,234,244,0.92);
+    background:${hexToRgba(accent, 0.1)}; border:1px solid ${hexToRgba(accent, 0.28)};`;
+  if (t.custom) {
+    t.tags.forEach(tag => row.appendChild(chip(tag, "✦", tagCss)));
+    row.appendChild(chip(t.text, "✎", `padding:${sm ? "3px 11px" : "5px 13px"}; font-size:${sm ? 12 : 12.5}px; font-weight:500; color:rgba(255,234,244,0.95);
+      background:${hexToRgba(accent, 0.14)}; border:1px solid ${hexToRgba(accent, 0.38)};`));
+  } else if (t.empty) {
+    row.appendChild(chip(t.empty, "", `padding:${sm ? "2px 10px" : "3px 11px"}; font-size:${sm ? 10.5 : 11}px; font-style:italic; color:rgba(255,234,244,0.55);
+      border:1px dashed ${hexToRgba(accent, 0.3)};`));
+  } else {
+    t.tags.forEach(tag => row.appendChild(chip(tag, "✦", tagCss)));
+    t.items.forEach(it => row.appendChild(chip(it.label, it.icon, itemCss)));
+  }
+  return row;
+}
+
+// ─── Mood-metrics + symptoms history for a cycle day ───
+// Mood/energy/sleep-quality/sleep-hours *and* symptoms for this exact
+// cycle day across past cycles, for the combined "On day X you usually
+// feel:" history popup.
+function getCycleDayHistory(targetCycleDay, maxCycles = PERIOD_CYCLE_LOOKBACK) {
+  const periodLog = getPeriodLog(); // sorted oldest → newest
+  if (periodLog.length < 2) return [];
+  const starts = periodLog.map(e => e.start);
+
+  const moodByDay = {};
+  getMoodLog().forEach(e => { moodByDay[e.date] = e; });
+
+  const todayIso = getPragueTodayIso();
+  const entries = [];
+  for (let i = starts.length - 2; i >= 0 && entries.length < maxCycles; i--) {
+    const cycleStart = starts[i];
+    const nextStart = starts[i + 1];
+    const cycleLen = daysBetween(cycleStart, nextStart);
+    if (targetCycleDay > cycleLen) continue;
+    const dateObj = parseLocalIso(cycleStart);
+    dateObj.setDate(dateObj.getDate() + (targetCycleDay - 1));
+    const dateIso = toLocalIso(dateObj);
+    if (dateIso >= todayIso) continue;
+    const mood = moodByDay[dateIso];
+    if (!mood) continue;
+    const symptoms = mood.symptoms || [];
+    const hasAny = typeof mood.mood === "number" || typeof mood.energy === "number" ||
+                   typeof mood.sleep === "number" || typeof mood.sleepHours === "number" ||
+                   typeof mood.orgasm === "boolean" || typeof mood.orgasmCount === "number" || symptoms.length > 0;
+    if (!hasAny) continue; // logged that day, but nothing relevant to this popup
+    entries.push({
+      date: dateIso,
+      cyclesAgo: starts.length - 1 - i,
+      mood: typeof mood.mood === "number" ? mood.mood : null,
+      energy: typeof mood.energy === "number" ? mood.energy : null,
+      sleep: typeof mood.sleep === "number" ? mood.sleep : null,
+      sleepHours: typeof mood.sleepHours === "number" ? mood.sleepHours : null,
+      orgasm: typeof mood.orgasm === "boolean" ? mood.orgasm : null,
+      orgasmCount: typeof mood.orgasmCount === "number" ? mood.orgasmCount : null,
+      symptoms,
+    });
+  }
+  return entries;
 }
 
 function logView(){const t=today();if(!LD||LD>t)LD=t;const e=ent(LD),c=cyc(LD),sy=new Set(e.symptoms||[]),o=e.orgasm,

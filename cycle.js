@@ -81,6 +81,19 @@ function getPragueRolledParts(cutoffMinutes) {
   return { year, month, day, hour, minute, second };
 }
 
+// The "log date" for a new reading-log entry: Prague time, with the
+// 12:00am–1:59am window counted toward the previous day (late-night
+// reading sessions log against the day you were mostly reading on).
+// Returns a Date object built from the *local* Date constructor using
+// Prague's wall-clock components — a deliberate trick so that every bit of
+// this script that later reads the stored entry.date with local getters
+// (getFullYear/getMonth/getDate/...) sees Prague time back out again,
+// regardless of this device's real timezone.
+function getPragueLogDate() {
+  const { year, month, day, hour, minute, second } = getPragueRolledParts(120);
+  return new Date(year, month, day, hour, minute, second);
+}
+
 // Returns a Date object whose LOCAL getters (getFullYear/getMonth/getDate/
 // getHours/getDay/getMinutes/...) report Prague's current *effective* day —
 // with the 12:00am–1:59am window still counted as the day before, so a
@@ -257,6 +270,19 @@ function getPeriodStats() {
   return { avgCycle, avgPeriod, nextPredicted, nextPredictedOvu, ovuAnchor, currentCycleDay, rawCycleDay, cycleShift, isOnPeriod, lastEntry, cycleDeviation, cycleDeviationCount: cycleLengths.length, cycleLengths, periodLengths };
 }
 
+// True if a reading-log timestamp falls within any logged period (ongoing
+// entries count through right now). Uses real Date comparisons rather than
+// string comparison, since entry.date carries a full timestamp.
+function isDateWithinLoggedPeriod(dateIso, periodLog) {
+  const d = new Date(dateIso);
+  const now = getPragueNow();
+  return periodLog.some(e => {
+    const start = new Date(e.start);
+    const end = e.end ? new Date(e.end + "T23:59:59") : now;
+    return d >= start && d <= end;
+  });
+}
+
 // ── Cycle-phase classification (for correlating with reading habits) ──
 // Uses typical phase proportions scaled to the person's own average cycle/period
 // length where available, falling back to textbook defaults (28-day cycle, 5-day period).
@@ -307,12 +333,57 @@ function classifyDateByCycle(dateIso, periodLog, avgCycle, avgPeriod) {
   return { cycleDay, phase: getPhaseForCycleDay(cycleDay, avgCycle, avgPeriod), ownerId: owner.id };
 }
 
+// ─── Cycle shift store mutators (ported from the userscript) ───
+// Reads (getCycleShiftStore / getCycleShiftFor) live in storage.js. Only the write
+// differs from the userscript: it goes through persist() to the SHIFT_KEY row
+// instead of localStorage.setItem, so these are async (await them).
+async function mutateCycleShiftStore(fn) {
+  const store = JSON.parse(JSON.stringify(getCycleShiftStore()));
+  fn(store);
+  await persist(SHIFT_KEY, store);
+}
+async function applyCycleShift(periodId, fromDate, offset) {
+  await mutateCycleShiftStore(st => { st.shifts[periodId] = { fromDate, offset }; });
+}
+async function clearCycleShift(periodId) {
+  await mutateCycleShiftStore(st => { delete st.shifts[periodId]; });
+}
+async function dismissCycleShiftSuggestion(dateIso) {
+  await mutateCycleShiftStore(st => { st.dismissed[dateIso] = true; });
+}
+
 // Days from today until the next occurrence of a given cycle day, wrapping
 // forward to the following cycle if that day has already passed this one.
 function daysUntilCycleDay(targetDay, currentCycleDay, cycleLen) {
   let delta = Math.round(targetDay) - Math.round(currentCycleDay);
   while (delta < 0) delta += Math.round(cycleLen);
   return delta;
+}
+
+// Finds the day, within the person's own cycle, where the phase changes next —
+// used to preview an upcoming transition (e.g. "In 3 days you'll likely enter PMS").
+function getNextPhaseTransition(currentCycleDay, avgCycle, avgPeriod) {
+  const cycleLen = Math.round(avgCycle || 28);
+  const currentPhase = getPhaseForCycleDay(currentCycleDay, avgCycle, avgPeriod);
+  for (let step = 1; step <= cycleLen; step++) {
+    // Wrap into the next cycle once we pass cycleLen, so day 25 + 10 on a
+    // 31-day cycle is treated as day 4 of the *next* cycle (menstrual),
+    // not day 35 of a cycle that only has 31 days.
+    const rawDay = currentCycleDay + step;
+    const day = ((rawDay - 1) % cycleLen) + 1;
+    const phase = getPhaseForCycleDay(day, avgCycle, avgPeriod);
+    if (phase !== currentPhase) return { phase, daysUntil: step };
+  }
+  return null;
+}
+
+// ── Calendar-day classification (logged / predicted / phase tint / cycle day) ──
+function findOwningPeriodEntry(dateIso, periodLog) {
+  const today = getPragueTodayIso();
+  return periodLog.find(e => {
+    const end = e.end || (e.start <= today ? today : e.start); // ongoing entries count through today
+    return dateIso >= e.start && dateIso <= end;
+  }) || null;
 }
 
 function cyc(d){const P=arr('period').filter(p=>p.start).sort((a,b)=>a.start.localeCompare(b.start));if(!P.length)return null;

@@ -114,6 +114,323 @@ async function flush(){if(busy)return;busy=true;let tries=0;
   try{await persist(K.mood,v);pend.splice(0,n);tries=0}
   catch(e){if(/changed somewhere/.test(e.message)&&++tries<4)continue;msg=e.message;pend=[];break}}
  busy=false;msg?draw():drawLog()}
+// ─── Cycle calculation logic ported verbatim from the AO3 userscript (source of truth) ───
+// Pure calculation only: nothing here is wired into the UI yet. Same storage keys as the
+// userscript; data comes from the already-synced `rows` instead of localStorage.
+const PERIOD_KEY     = K.period; // "ao3_period_log_v1"
+const MOOD_KEY       = K.mood;   // "ao3_mood_log_v1"
+const SHIFT_KEY      = "ao3_cycle_shift_v1";   // { shifts: {periodId: {fromDate, offset}}, dismissed: {date: true}, notified: {date: true} }
+const PERIOD_CYCLE_LOOKBACK = 6; // number of most recent cycles used for averages
+
+// Web-app replacements for the userscript's localStorage readers (same keys, via Supabase rows).
+function getPeriodLog() { return arr("period"); }
+function getMoodLog() { return moodArr(); }
+
+const MS_PER_DAY = 86400000;
+
+function daysBetween(a, b) {
+  // Whole-day difference, ignoring time-of-day drift
+  const da = new Date(a); da.setHours(0,0,0,0);
+  const db = new Date(b); db.setHours(0,0,0,0);
+  return Math.round((db - da) / MS_PER_DAY);
+}
+
+// Formats a Date object as a local-calendar "YYYY-MM-DD" string.
+// Deliberately NOT toISOString(): that converts to UTC first, which shifts
+// the date backward a day for anyone in a UTC+ timezone (local midnight
+// becomes the previous day once converted to UTC).
+function toLocalIso(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+// Parses a "YYYY-MM-DD" string into a Date at *local* midnight.
+// Deliberately NOT `new Date(str)`: passed a date-only string, that parses
+// as UTC midnight, so a later .setDate()/.getDate() or re-format can land
+// on the wrong calendar day depending on this device's offset from UTC.
+// Building it from explicit components avoids that entirely.
+function parseLocalIso(str) {
+  const [y, m, day] = str.split("-").map(Number);
+  return new Date(y, m - 1, day);
+}
+
+// Returns the current wall-clock date/time in Prague, regardless of what
+// timezone this device is actually set to (uses Intl's IANA tz database,
+// so CET/CEST DST transitions are handled automatically).
+function getPragueNowParts() {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Europe/Prague",
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date());
+  const get = type => parts.find(p => p.type === type).value;
+  return {
+    year:   parseInt(get("year"), 10),
+    month:  parseInt(get("month"), 10) - 1, // 0-indexed, matches Date
+    day:    parseInt(get("day"), 10),
+    hour:   parseInt(get("hour"), 10) % 24, // Intl can return "24" for midnight
+    minute: parseInt(get("minute"), 10),
+    second: parseInt(get("second"), 10),
+  };
+}
+
+// Rolls Prague's raw wall-clock date/time parts back onto the *previous*
+// calendar day whenever it's before the given cutoff (in minutes since
+// midnight) — e.g. cutoff=120 means anything from 12:00am–1:59am still
+// counts as "yesterday". Clock time (hour/minute/second) itself is left
+// untouched; only year/month/day shift. This is the single source of
+// truth for the app's "day boundary" — everything that needs to know
+// what day it currently is (not just the literal wall-clock date) should
+// go through this rather than reading getPragueNowParts() raw.
+function getPragueRolledParts(cutoffMinutes) {
+  const { year, month, day, hour, minute, second } = getPragueNowParts();
+  const minutesSinceMidnight = hour * 60 + minute;
+  if (minutesSinceMidnight < cutoffMinutes) {
+    const rolled = new Date(year, month, day);
+    rolled.setDate(rolled.getDate() - 1);
+    return {
+      year: rolled.getFullYear(), month: rolled.getMonth(), day: rolled.getDate(),
+      hour, minute, second,
+    };
+  }
+  return { year, month, day, hour, minute, second };
+}
+
+// Returns a Date object whose LOCAL getters (getFullYear/getMonth/getDate/
+// getHours/getDay/getMinutes/...) report Prague's current *effective* day —
+// with the 12:00am–1:59am window still counted as the day before, so a
+// late night doesn't flip today-highlighting, streaks, default log dates,
+// etc. over to the next calendar day the moment the clock ticks past
+// midnight. Use this instead of a bare `new Date()` anywhere the script
+// needs "the current moment" for calendar-day logic — today-highlighting,
+// streaks, month/heatmap nav, chart windows, default filter months, etc.
+// Note: hour/minute/second still reflect the real wall-clock time; only
+// year/month/day roll back before 2am.
+function getPragueNow() {
+  const { year, month, day, hour, minute, second } = getPragueRolledParts(120);
+  return new Date(year, month, day, hour, minute, second);
+}
+
+// Prague's current calendar day as "YYYY-MM-DD". Use this anywhere the
+// code needs today's date key (mood/period entries, the calendar's
+// "today" cell, default log dates) instead of
+// `new Date().toISOString().slice(0, 10)` — that converts to UTC first
+// and lands on the wrong day for part of the night in a UTC+ timezone
+// like Prague.
+function getPragueTodayIso() {
+  return toLocalIso(getPragueNow());
+}
+
+// Cycle length = days between consecutive period start dates.
+function getCycleLengths(log) {
+  const sorted = [...log].sort((a, b) => new Date(a.start) - new Date(b.start));
+  const lengths = [];
+  for (let i = 1; i < sorted.length; i++) {
+    lengths.push(daysBetween(sorted[i - 1].start, sorted[i].start));
+  }
+  return lengths;
+}
+
+function getPeriodLengths(log) {
+  return log
+    .filter(e => e.end)
+    .map(e => daysBetween(e.start, e.end) + 1); // inclusive of both days
+}
+
+function average(arr) {
+  if (!arr.length) return null;
+  return arr.reduce((s, v) => s + v, 0) / arr.length;
+}
+
+// ─── Ovulation estimate (watery discharge) ───
+// The SECOND day you log "Watery discharge" inside the plausible ovulation
+// window of a cycle is treated as your ovulation day. It is only used for ONE
+// extra stat: a second period prediction (ovulation + ~14 days) shown next to
+// the usual one, saying whether your period may come earlier or later.
+// It never moves phases, cycle days, or the normal prediction.
+// Everything is derived live from the mood log, so deleting the symptom
+// undoes it; "Undo" in the Upcoming card switches it off for one cycle.
+const OVU_SYMPTOM        = "Watery discharge";
+const OVU_TO_PERIOD_DAYS = 14;  // ovulation day -> next period
+const OVU_WIN_BEFORE     = 6;   // accept the symptom from this many days before predicted ovulation...
+const OVU_WIN_AFTER      = 4;   // ...to this many days after it
+const OVU_OFF_KEY        = "ao3_ovu_anchor_off_v1"; // { periodId: true }
+
+function getOvuOffStore() {
+  try { const o = rows[OVU_OFF_KEY]?.value || {}; return (o && typeof o === "object") ? o : {}; }
+  catch { return {}; }
+}
+
+let _ovuCacheKey = null, _ovuCache = new Map();
+
+// Returns { date (ovulation day), firstDate, nextPeriod } or null.
+// Ovulation day = the second distinct day with Watery discharge logged inside the window.
+// With ignoreOff=true the "Undo" switch is ignored (to offer turning it back on).
+function getOvulationAnchor(owner, avgCycle, avgPeriod, ignoreOff) {
+  if (!owner) return null;
+  if (!ignoreOff && getOvuOffStore()[owner.id]) return null;
+  const moodRaw = JSON.stringify(getMoodLog());
+  const key = moodRaw + "|" + (avgCycle || "") + "|" + (avgPeriod || "");
+  if (key !== _ovuCacheKey) { _ovuCacheKey = key; _ovuCache = new Map(); }
+  const cacheId = owner.id + (ignoreOff ? "|any" : "");
+  if (_ovuCache.has(cacheId)) return _ovuCache.get(cacheId);
+
+  const { ovulationDay } = getCycleMarkers(avgCycle, avgPeriod);
+  const days = new Set();
+  getMoodLog().forEach(e => {
+    if (!e || !e.date || !Array.isArray(e.symptoms) || !e.symptoms.includes(OVU_SYMPTOM)) return;
+    if (e.date < owner.start) return;
+    const rawDay = daysBetween(owner.start, e.date) + 1;
+    if (rawDay < ovulationDay - OVU_WIN_BEFORE || rawDay > ovulationDay + OVU_WIN_AFTER) return;
+    days.add(String(e.date).slice(0, 10));
+  });
+  const sorted = [...days].sort();
+  let res = null;
+  if (sorted.length >= 2) {
+    const ov = parseLocalIso(sorted[1]);
+    const np = new Date(ov); np.setDate(np.getDate() + OVU_TO_PERIOD_DAYS);
+    res = { date: sorted[1], firstDate: sorted[0], nextPeriod: toLocalIso(np) };
+  }
+  _ovuCache.set(cacheId, res);
+  return res;
+}
+
+// Phase of a day of the CURRENT cycle (plain calendar count; ovulation estimate doesn't affect it).
+function getPhaseForStatsDay(cycleDay, stats) {
+  return getPhaseForCycleDay(cycleDay, stats.avgCycle, stats.avgPeriod);
+}
+
+// Days until the next period.
+function getDaysToNextPeriod(stats, cycleLen) {
+  return daysUntilCycleDay(cycleLen + 1, stats.currentCycleDay, cycleLen);
+}
+
+// Returns { avgCycle, avgPeriod, nextPredicted, currentCycleDay, isOnPeriod, lastEntry,
+//   cycleDeviation, cycleDeviationCount, cycleLengths, periodLengths }
+// cycleDeviation is the mean absolute deviation (in days) of the *same* recent
+// cycle-length window used to compute avgCycle/nextPredicted — i.e. how much
+// those particular cycles have actually wobbled, which is what should drive
+// how much to trust the prediction above, rather than an all-time figure that
+// could include a much steadier (or shakier) era of the person's history.
+function getPeriodStats() {
+  const log = getPeriodLog();
+  if (!log.length) {
+    return { avgCycle: null, avgPeriod: null, nextPredicted: null, currentCycleDay: null, isOnPeriod: false, lastEntry: null, cycleDeviation: null, cycleDeviationCount: 0, cycleLengths: [], periodLengths: [] };
+  }
+  const sorted = [...log].sort((a, b) => new Date(a.start) - new Date(b.start));
+  const lastEntry = sorted[sorted.length - 1];
+
+  const cycleLengths  = getCycleLengths(sorted).slice(-PERIOD_CYCLE_LOOKBACK);
+  const periodLengths = getPeriodLengths(sorted).slice(-PERIOD_CYCLE_LOOKBACK);
+  const avgCycle  = average(cycleLengths);
+  const avgPeriod = average(periodLengths);
+  // Needs at least 2 cycle-length samples to say anything about *variation*
+  // (a single gap has nothing to vary against).
+  const cycleDeviation = (cycleLengths.length >= 2 && avgCycle)
+    ? average(cycleLengths.map(l => Math.abs(l - avgCycle)))
+    : null;
+
+  const cycleShift = getCycleShiftFor(lastEntry.id);
+  const shiftOffset = cycleShift ? cycleShift.offset : 0;
+
+  let nextPredicted = null;
+  if (avgCycle) {
+    const predicted = parseLocalIso(lastEntry.start);
+    // Running a day "ahead" (offset +1) means the next period should land a day sooner.
+    predicted.setDate(predicted.getDate() + Math.round(avgCycle) - shiftOffset);
+    nextPredicted = toLocalIso(predicted);
+  }
+
+  const today = getPragueTodayIso();
+  const isOnPeriod = !lastEntry.end
+    ? new Date(lastEntry.start) <= new Date(today)
+    : new Date(lastEntry.start) <= new Date(today) && new Date(today) <= new Date(lastEntry.end);
+
+  const rawCycleDay = daysBetween(lastEntry.start, today) + 1;
+  const currentCycleDay = rawCycleDay + (cycleShift && today >= cycleShift.fromDate ? shiftOffset : 0);
+  // Watery-discharge ovulation estimate: only feeds the extra "based on your ovulation" stat.
+  const ovuAnchor = getOvulationAnchor(lastEntry, avgCycle, avgPeriod);
+  const nextPredictedOvu = ovuAnchor ? ovuAnchor.nextPeriod : null;
+
+  return { avgCycle, avgPeriod, nextPredicted, nextPredictedOvu, ovuAnchor, currentCycleDay, rawCycleDay, cycleShift, isOnPeriod, lastEntry, cycleDeviation, cycleDeviationCount: cycleLengths.length, cycleLengths, periodLengths };
+}
+
+// ── Cycle-phase classification (for correlating with reading habits) ──
+// Uses typical phase proportions scaled to the person's own average cycle/period
+// length where available, falling back to textbook defaults (28-day cycle, 5-day period).
+const PHASE_DEFS = [
+  { key: "menstrual", label: "Menstrual" },
+  { key: "follicular", label: "Follicular" },
+  { key: "ovulatory", label: "Ovulatory" },
+  { key: "luteal", label: "Luteal" },
+  { key: "pms", label: "PMS" },
+];
+const PMS_WINDOW_DAYS = 7; // last N days of the cycle, right before the next period starts
+
+function getCycleMarkers(avgCycle, avgPeriod) {
+  const cycleLen  = Math.round(avgCycle || 28);
+  const periodLen = Math.round(avgPeriod || 5);
+  const ovulationDay = Math.max(periodLen + 1, Math.round(cycleLen / 2));
+  // PMS window is the last PMS_WINDOW_DAYS days of the cycle, but never allowed
+  // to eat into the ovulatory window on short cycles.
+  const pmsStart = Math.max(ovulationDay + 2, cycleLen - (PMS_WINDOW_DAYS - 1));
+  return { cycleLen, periodLen, ovulationDay, pmsStart };
+}
+
+function getPhaseForCycleDay(cycleDay, avgCycle, avgPeriod) {
+  const { periodLen, ovulationDay, pmsStart } = getCycleMarkers(avgCycle, avgPeriod);
+
+  if (cycleDay <= periodLen) return "menstrual";
+  if (cycleDay >= pmsStart) return "pms";
+  if (cycleDay < ovulationDay - 1) return "follicular";
+  if (cycleDay <= ovulationDay + 1) return "ovulatory";
+  return "luteal";
+}
+
+// Finds which period entry a given date falls under (most recent start on/before it)
+// and returns that date's cycle day + phase. Returns null if it predates all logged periods.
+function classifyDateByCycle(dateIso, periodLog, avgCycle, avgPeriod) {
+  const sorted = [...periodLog].sort((a, b) => new Date(a.start) - new Date(b.start));
+  let owner = null;
+  for (const entry of sorted) {
+    if (new Date(entry.start) <= new Date(dateIso)) owner = entry;
+    else break;
+  }
+  if (!owner) return null;
+  let cycleDay = daysBetween(owner.start, dateIso) + 1;
+  // A confirmed "this cycle slipped by a day" shift applies from its start date onward.
+  const shift = getCycleShiftFor(owner.id);
+  if (shift && String(dateIso).slice(0, 10) >= shift.fromDate) cycleDay += shift.offset;
+  if (cycleDay < 1 || (avgCycle && cycleDay > avgCycle + 10)) return null; // too far past — unreliable
+  return { cycleDay, phase: getPhaseForCycleDay(cycleDay, avgCycle, avgPeriod), ownerId: owner.id };
+}
+
+let _shiftRaw = null, _shiftParsed = { shifts: {}, dismissed: {}, notified: {} };
+function getCycleShiftStore() {
+  const raw = rows[SHIFT_KEY]?.value == null ? "" : JSON.stringify(rows[SHIFT_KEY].value);
+  if (raw !== _shiftRaw) {
+    _shiftRaw = raw;
+    try {
+      const o = JSON.parse(raw || "{}");
+      _shiftParsed = { shifts: o.shifts || {}, dismissed: o.dismissed || {}, notified: o.notified || {} };
+    } catch { _shiftParsed = { shifts: {}, dismissed: {}, notified: {} }; }
+  }
+  return _shiftParsed;
+}
+
+function getCycleShiftFor(periodId) { return getCycleShiftStore().shifts[periodId] || null; }
+
+// Days from today until the next occurrence of a given cycle day, wrapping
+// forward to the following cycle if that day has already passed this one.
+function daysUntilCycleDay(targetDay, currentCycleDay, cycleLen) {
+  let delta = Math.round(targetDay) - Math.round(currentCycleDay);
+  while (delta < 0) delta += Math.round(cycleLen);
+  return delta;
+}
+
 function cyc(d){const P=arr('period').filter(p=>p.start).sort((a,b)=>a.start.localeCompare(b.start));if(!P.length)return null;
  const dd=(a,b)=>Math.round((new Date(b+'T12:00')-new Date(a+'T12:00'))/864e5),avg=a=>a.length?a.reduce((s,x)=>s+x,0)/a.length:null;
  const gp=P.slice(1).map((p,i)=>dd(P[i].start,p.start)).slice(-6),ga=avg(gp),dev=gp.length>=2?avg(gp.map(x=>Math.abs(x-ga))):null,cl=Math.round(ga||28),pl=Math.round(avg(P.filter(p=>p.end).map(p=>dd(p.start,p.end)+1).slice(-6))||5);

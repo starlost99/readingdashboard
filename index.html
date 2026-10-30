@@ -431,6 +431,171 @@ function daysUntilCycleDay(targetDay, currentCycleDay, cycleLen) {
   return delta;
 }
 
+// ─── Cycle-day titles (logic only, ported from the userscript; no UI) ───
+const TITLES_KEY     = "ao3_cycle_day_titles_v1"; // { "15": "custom title" } — your own titles win over auto ones
+const TITLE_MIN_COUNT = 2;     // a symptom must have shown up this many times...
+const TITLE_MIN_SHARE = 0.5;   // ...and on at least this share of the logged days
+const TITLE_MAX_SYMPTOMS = 3;
+const TITLE_MOOD_DIFF = 0.5;   // distance from your usual (1-5 scale) worth mentioning
+const TITLE_PHRASES = {
+  "Cramps": "cramps", "Pre-period cramps": "early cramps", "Ovulation pain": "ovulation twinge", "Spasms": "spasms",
+  "Headache": "headache", "Tender breasts": "tender breasts", "Bloating": "bloated", "Muscle aches": "achy",
+  "PMS flu": "pms flu", "Spotting": "spotting", "Acne": "breakouts", "Oily hair": "oily hair",
+  "Watery discharge": "watery discharge", "Sweating": "sweaty", "Hot flashes": "hot flashes", "Dry eyes": "dry eyes",
+  "Eye strain": "eye strain", "Fatigue": "tired", "Hungry": "hungry", "Small appetite": "small appetite",
+  "Cravings": "cravings", "Craving chocolate": "chocolate craving", "Vivid dreams": "vivid dreams", "Nesting": "nesting",
+  "Emotional": "emotional", "Irritable": "irritable", "Anxiety": "anxious", "Overthinking": "overthinking",
+  "Self critical": "self-critical", "Hopelessness": "hopeless", "PMDD": "pmdd flare", "Calm": "calm",
+  "Confident": "confident", "Feeling okay": "feeling okay", "Hating men": "hating men",
+  "Taking it personally": "taking things personally", "Over it": "over it", "Sad": "sad",
+  "Sociable": "sociable", "Solitary": "wants solitude", "Flirty": "flirty", "High libido": "high libido", "Low libido": "low libido",
+};
+// Web-app reader: same key, via the synced rows instead of localStorage.
+function symptomIcon(symptom) { return SI[symptom] || "•"; } // userscript uses SYMPTOM_ICONS (same map as the web app's SI)
+
+function getCycleDayTitles() {
+  try {
+    const o = rows[TITLES_KEY]?.value || {};
+    return (o && typeof o === "object" && !Array.isArray(o)) ? o : {};
+  } catch { return {}; }
+}
+
+function getCycleDayTags(day, stats) {
+  const { cycleLen, ovulationDay, pmsStart } = getCycleMarkers(stats.avgCycle, stats.avgPeriod);
+  const tags = [];
+  if (day === 1) tags.push("period starts");
+  if (day === ovulationDay - 1) tags.push("first day of possible ovulation");
+  if (day === ovulationDay + 1) tags.push("last day of possible ovulation");
+  if (day === pmsStart) tags.push("pms week starts");
+  if (day === cycleLen) tags.push("period due around now");
+  return tags;
+}
+
+const TITLE_NOTE_ICONS = {
+  "good-mood day": "😊", "low-mood day": "🌧️", "high energy": "⚡", "low energy": "🪫",
+  "rough sleep": "😵‍💫", "good sleep": "😴",
+};
+
+// Structured pieces of the automatic title: heads-up tags plus items
+// ({label, icon}) for symptoms and mood/energy/sleep notes.
+function buildAutoCycleDayTitleParts(day, bucket, baseline, stats) {
+  const tags = getCycleDayTags(day, stats);
+  const items = [];
+  if (bucket && bucket.entryCount >= 2) {
+    Object.entries(bucket.symptoms || {})
+      .filter(([, n]) => n >= TITLE_MIN_COUNT && n / bucket.entryCount >= TITLE_MIN_SHARE)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, TITLE_MAX_SYMPTOMS)
+      .forEach(([name]) => items.push({ label: TITLE_PHRASES[name] || name.toLowerCase(), icon: symptomIcon(name) }));
+    const avg = (sum, n) => (n >= 2 ? sum / n : null);
+    const mood = avg(bucket.moodSum, bucket.moodCount), energy = avg(bucket.energySum, bucket.energyCount), sleep = avg(bucket.sleepSum, bucket.sleepCount);
+    const note = label => items.push({ label, icon: TITLE_NOTE_ICONS[label] || "" });
+    if (mood != null && baseline.mood != null) {
+      if (mood - baseline.mood >= TITLE_MOOD_DIFF) note("good-mood day");
+      else if (baseline.mood - mood >= TITLE_MOOD_DIFF) note("low-mood day");
+    }
+    if (energy != null && baseline.energy != null) {
+      if (energy - baseline.energy >= TITLE_MOOD_DIFF) note("high energy");
+      else if (baseline.energy - energy >= TITLE_MOOD_DIFF) note("low energy");
+    }
+    if (sleep != null && baseline.sleep != null) {
+      if (baseline.sleep - sleep >= TITLE_MOOD_DIFF) note("rough sleep");
+      else if (sleep - baseline.sleep >= TITLE_MOOD_DIFF) note("good sleep");
+    }
+  }
+  const shown = items.slice(0, 4);
+  let empty = null;
+  if (!tags.length && !shown.length) empty = (bucket && bucket.entryCount) ? "no clear pattern yet" : "nothing logged on this day yet";
+  return { tags, items: shown, empty };
+}
+
+function buildAutoCycleDayTitle(day, bucket, baseline, stats) {
+  const { tags, items, empty } = buildAutoCycleDayTitleParts(day, bucket, baseline, stats);
+  if (empty) return empty;
+  return [...tags, items.map(i => i.label).join(", ")].filter(Boolean).join(" · ");
+}
+
+// ─── Mood / symptom stats by cycle day (ported from the userscript; no UI) ───
+// A day can also carry sick: true ("I was ill that day"). Everything logged on a
+// sick day is tinted by the illness, so those entries still count but only
+// weigh SICK_DAY_WEIGHT as much as a normal day in the averages, baselines
+// and day-score predictions (1 = full weight, 0 = ignored entirely).
+const SICK_DAY_WEIGHT = 0.25;
+function moodEntryWeight(entry) { return entry && entry.sick === true ? SICK_DAY_WEIGHT : 1; }
+
+// Buckets mood/symptom log entries by exact cycle day (1, 2, 3, ...) rather
+// than by phase. Lets the overview card show what a *specific* day of the
+// cycle usually looks like, falling back to the coarser phase-level bucket
+// (getMoodStatsByPhase) only when a given day has no history of its own.
+// Tallies one more occurrence of `value` in a {value: count} histogram —
+// shared by the phase and cycle-day mood buckets below, used to find the
+// most-common logged value (the mode) instead of just averaging.
+function bumpHistogram(hist, value, weight = 1) {
+  hist[value] = (hist[value] || 0) + weight;
+}
+
+function getMoodStatsByCycleDay() {
+  const periodLog = getPeriodLog();
+  const buckets = {};
+  if (!periodLog.length) return buckets;
+
+  const { avgCycle, avgPeriod } = getPeriodStats();
+  getMoodLog().forEach(entry => {
+    const classified = classifyDateByCycle(entry.date, periodLog, avgCycle, avgPeriod);
+    if (!classified) return;
+    const day = classified.cycleDay;
+    if (!buckets[day]) buckets[day] = {
+      moodSum: 0, moodCount: 0, energySum: 0, energyCount: 0, sleepSum: 0, sleepCount: 0, sleepHoursSum: 0, sleepHoursCount: 0,
+      moodValues: {}, energyValues: {}, sleepValues: {}, sleepHoursValues: {},
+      symptoms: {}, symptomsW: {}, entryCount: 0, entryWeight: 0, orgasmLoggedCount: 0, orgasmTrueCount: 0,
+    };
+    const b = buckets[day];
+    const w = moodEntryWeight(entry);
+    b.entryCount += 1;
+    b.entryWeight += w;
+    if (typeof entry.mood === "number")   { b.moodSum += entry.mood * w; b.moodCount += w; bumpHistogram(b.moodValues, entry.mood, w); }
+    if (typeof entry.energy === "number") { b.energySum += entry.energy * w; b.energyCount += w; bumpHistogram(b.energyValues, entry.energy, w); }
+    if (typeof entry.sleep === "number")  { b.sleepSum += entry.sleep * w; b.sleepCount += w; bumpHistogram(b.sleepValues, entry.sleep, w); }
+    if (typeof entry.sleepHours === "number") { b.sleepHoursSum += entry.sleepHours * w; b.sleepHoursCount += w; bumpHistogram(b.sleepHoursValues, entry.sleepHours, w); }
+    if (typeof entry.orgasm === "boolean") { b.orgasmLoggedCount += 1; if (entry.orgasm) b.orgasmTrueCount += 1; }
+    (entry.symptoms || []).forEach(s => { b.symptoms[s] = (b.symptoms[s] || 0) + 1; b.symptomsW[s] = (b.symptomsW[s] || 0) + w; });
+  });
+  return buckets;
+}
+
+// ─── Baseline: overall average mood/energy/sleep across ALL logged days ───
+// Not phase-bucketed — this is "your usual" self, used to show phase/day
+// stats as a delta ("↑ 0.5 above your usual") instead of just a raw number.
+function getOverallMoodBaseline() {
+  const log = getMoodLog();
+  let moodSum = 0, moodCount = 0, energySum = 0, energyCount = 0,
+      sleepSum = 0, sleepCount = 0, sleepHoursSum = 0, sleepHoursCount = 0;
+  log.forEach(e => {
+    const w = moodEntryWeight(e);
+    if (typeof e.mood === "number")       { moodSum += e.mood * w; moodCount += w; }
+    if (typeof e.energy === "number")     { energySum += e.energy * w; energyCount += w; }
+    if (typeof e.sleep === "number")      { sleepSum += e.sleep * w; sleepCount += w; }
+    if (typeof e.sleepHours === "number") { sleepHoursSum += e.sleepHours * w; sleepHoursCount += w; }
+  });
+  return {
+    mood: moodCount ? moodSum / moodCount : null,
+    energy: energyCount ? energySum / energyCount : null,
+    sleep: sleepCount ? sleepSum / sleepCount : null,
+    sleepHours: sleepHoursCount ? sleepHoursSum / sleepHoursCount : null,
+  };
+}
+
+// { text, custom, tags, items, empty } — pass precomputed buckets/baseline when titling many days.
+function getCycleDayTitle(day, stats, buckets, baseline) {
+  const custom = getCycleDayTitles()[day];
+  // Your own title never hides the heads-up tags (period starts, ovulation, pms week starts…)
+  if (custom) return { text: custom, custom: true, tags: getCycleDayTags(day, stats || getPeriodStats()), items: [], empty: null };
+  const b = (buckets || getMoodStatsByCycleDay())[day] || null;
+  const parts = buildAutoCycleDayTitleParts(day, b, baseline || getOverallMoodBaseline(), stats || getPeriodStats());
+  const text = parts.empty || [...parts.tags, parts.items.map(i => i.label).join(", ")].filter(Boolean).join(" · ");
+  return { text, custom: false, ...parts };
+}
+
 function cyc(d){const P=arr('period').filter(p=>p.start).sort((a,b)=>a.start.localeCompare(b.start));if(!P.length)return null;
  const dd=(a,b)=>Math.round((new Date(b+'T12:00')-new Date(a+'T12:00'))/864e5),avg=a=>a.length?a.reduce((s,x)=>s+x,0)/a.length:null;
  const gp=P.slice(1).map((p,i)=>dd(P[i].start,p.start)).slice(-6),ga=avg(gp),dev=gp.length>=2?avg(gp.map(x=>Math.abs(x-ga))):null,cl=Math.round(ga||28),pl=Math.round(avg(P.filter(p=>p.end).map(p=>dd(p.start,p.end)+1).slice(-6))||5);

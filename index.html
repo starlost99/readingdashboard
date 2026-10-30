@@ -126,6 +126,10 @@ const PERIOD_CYCLE_LOOKBACK = 6; // number of most recent cycles used for averag
 function getPeriodLog() { return arr("period"); }
 function getMoodLog() { return moodArr(); }
 
+function getMoodForDate(date) {
+  return getMoodLog().find(e => e.date === date) || null;
+}
+
 const MS_PER_DAY = 86400000;
 
 function daysBetween(a, b) {
@@ -222,6 +226,27 @@ function getPragueNow() {
 // like Prague.
 function getPragueTodayIso() {
   return toLocalIso(getPragueNow());
+}
+
+// A device-timezone-independent integer that increments exactly once per
+// Prague *effective* day (2am boundary, same as getPragueNow()) — used for
+// deterministic "rotate by day" picks: the daily tarot/read draws, the
+// reading-mood rotation, the companion's daily photo, etc. Built from
+// Date.UTC on Prague's own rolled-over y/m/d so it isn't affected by
+// whatever timezone this device happens to be in.
+function getPragueDayIndex() {
+  const { year, month, day } = getPragueRolledParts(120);
+  return Math.floor(Date.UTC(year, month, day) / MS_PER_DAY);
+}
+
+// Prague's calendar date N days ago (or ahead, for negative n), as
+// "YYYY-MM-DD". Building it by shifting getPragueNow()'s own local fields
+// (rather than subtracting n*86400000 from Date.now()) keeps it correct
+// regardless of this device's real timezone or DST transitions.
+function getPragueDaysAgoIso(n) {
+  const d = getPragueNow();
+  d.setDate(d.getDate() - n);
+  return toLocalIso(d);
 }
 
 // Cycle length = days between consecutive period start dates.
@@ -632,6 +657,7 @@ function logAct(b){const a=b.dataset.a,d=b.dataset,e=ent(LD);
  else if(a==='lg-w'){WK=WK===+d.d?null:+d.d;drawLog()}
  else if(a==='lg-q'){QO++;drawLog()}
  else if(a==='lg-h')pet()
+ else if(a==='lg-mh')openCompanionMoodHistory(d.pc)
  else if(a==='lg-p')lgPer(d.v)}
 
 
@@ -704,11 +730,427 @@ follicular:["has a little more bounce today and is hoping you do too.","thinks t
 ovulatory:["is feeling extra friendly and wants you to know it.","thinks you should text that person back. today.","is glowing a little. it's not sure why. neither is anyone.","wants to go somewhere with you. anywhere.","is very proud of you for no particular reason."],
 luteal:["is nesting. it's not going to explain the nest.","thinks a cosy reread is exactly the right call.","brought snacks and zero opinions.","wants things finished, quietly, with no drama.","is staying close and keeping the volume down."],
 pms:["is lowering everyone's expectations on your behalf.","thinks comfort over adventure today. no appeals.","is guarding you from small annoyances.","brought dark chocolate and a very soft look.","is not taking anything personally on your behalf."]};
+const COMPANION_FEELINGS = [
+  { emoji: "😳", label: "feels a little shy right now" },
+  { emoji: "😌", label: "is feeling calm and settled" },
+  { emoji: "🥹", label: "is a little overwhelmed, in a good way" },
+  { emoji: "😴", label: "is having a sleepy sort of day" },
+  { emoji: "🤭", label: "is in a mischievous mood" },
+  { emoji: "🥰", label: "is feeling especially fond of you today" },
+  { emoji: "😊", label: "is quietly content" },
+  { emoji: "🫠", label: "is melting a little, happily" },
+  { emoji: "🤔", label: "is deep in thought about something" },
+  { emoji: "🥳", label: "is in a giddy, celebratory mood" },
+  { emoji: "🙂‍↕️", label: "is feeling a little wobbly today, in a fine way" },
+  { emoji: "😇", label: "is feeling unusually angelic" },
+  { emoji: "🥲", label: "is feeling something bittersweet" },
+  { emoji: "😤", label: "is puffed up with quiet determination" },
+  { emoji: "🫣", label: "is peeking out from behind its own paws" },
+  { emoji: "😋", label: "is in a satisfied, well-fed sort of mood" },
+  { emoji: "🥱", label: "is having a slow, unhurried day" },
+  { emoji: "😽", label: "is feeling especially affectionate" },
+  { emoji: "🤗", label: "is in a huggy sort of mood" },
+  { emoji: "🫡", label: "is feeling weirdly dutiful today" },
+  { emoji: "🥴", label: "is feeling a bit scrambled, harmlessly" },
+  { emoji: "😙", label: "is in a soft, whistly-content mood" },
+  { emoji: "🥺", label: "is feeling a little tender-hearted today" },
+  { emoji: "😶‍🌫️", label: "is off in a daydream somewhere" },
+  { emoji: "🫥", label: "is feeling a bit quiet and faded today" },
+  { emoji: "😼", label: "is in a smug, pleased-with-itself mood" },
+  { emoji: "🙃", label: "is feeling a little upside-down today, harmlessly" },
+  { emoji: "😯", label: "is easily startled and wide-eyed today" },
+  { emoji: "🥸", label: "is feeling silly and a little theatrical" },
+  { emoji: "😐", label: "is feeling neutral, just puttering along" },
+  { emoji: "🤨", label: "is feeling skeptical of something, unprompted" },
+  { emoji: "😗", label: "is humming quietly to itself" },
+  { emoji: "🫤", label: "is feeling a little unsettled, nothing serious" },
+  { emoji: "🩵", label: "is feeling shy but pleased underneath it" },
+  { emoji: "🤍", label: "is feeling gentle and soft-hearted" },
+  { emoji: "🫶", label: "is feeling grateful for you today" },
+  { emoji: "🐈‍⬛", label: "is feeling sneaky, in a playful way" },
+  { emoji: "🥶", label: "is feeling a little chilly today" },
+  { emoji: "🫨", label: "is feeling wonderfully, harmlessly rattled" },
+  { emoji: "😵‍💫", label: "is feeling a bit dizzy and dreamy" },
+  { emoji: "🙂", label: "is feeling steady and unremarkably fine" },
+  { emoji: "😆", label: "is in a bright, laughing sort of mood" },
+  { emoji: "🩷", label: "is feeling sentimental about something small" },
+  { emoji: "😮‍💨", label: "is letting out a long, satisfied sigh" },
+  { emoji: "🦉", label: "is quietly keeping watch tonight" },
+  { emoji: "🐾", label: "is restless and padding around a lot today" },
+  { emoji: "🌤️", label: "is feeling brighter than usual today" },
+  { emoji: "🌧️", label: "is feeling a little rained-on, but okay" },
+  { emoji: "🫂", label: "is craving closeness today" },
+  { emoji: "🧸", label: "is feeling soft and a little clingy" },
+  { emoji: "🕊️", label: "is feeling unusually peaceful" },
+  { emoji: "🎐", label: "is feeling light and easily swayed today" },
+  { emoji: "🪄", label: "is feeling whimsical and a little magical" },
+  { emoji: "🍵", label: "is in a slow, tea-sipping kind of mood" },
+  { emoji: "🌙", label: "is feeling dreamy and half-asleep" },
+  { emoji: "🐣", label: "is feeling small and a little new to everything" },
+  { emoji: "🦦", label: "is feeling playful and a bit fidgety" },
+];
+const COMPANION_TRINKETS = [
+  { emoji: "🌼", label: "brought you a little daisy" },
+  { emoji: "🐚", label: "brought you a smooth seashell" },
+  { emoji: "🍄", label: "brought you a tiny mushroom" },
+  { emoji: "🪶", label: "brought you a soft feather" },
+  { emoji: "🍂", label: "brought you a pressed leaf" },
+  { emoji: "🔮", label: "brought you a little marble" },
+  { emoji: "🎀", label: "brought you a spare ribbon" },
+  { emoji: "🧷", label: "brought you a shiny little pin" },
+  { emoji: "🪨", label: "brought you a smooth pebble" },
+  { emoji: "🍬", label: "brought you a wrapped candy" },
+  { emoji: "🍀", label: "brought you a lucky clover" },
+  { emoji: "🌰", label: "brought you a little acorn" },
+  { emoji: "🧵", label: "brought you a spool of thread" },
+  { emoji: "🕯️", label: "brought you a stubby little candle" },
+  { emoji: "🪱", label: "brought you a rubbery little worm charm" },
+  { emoji: "🍯", label: "brought you a drop of honey" },
+  { emoji: "🧿", label: "brought you a little evil-eye bead" },
+  { emoji: "🪵", label: "brought you a piece of driftwood" },
+  { emoji: "🦴", label: "brought you a tiny bone-shaped trinket" },
+  { emoji: "🧶", label: "brought you a ball of yarn" },
+  { emoji: "🍒", label: "brought you a pair of cherries" },
+  { emoji: "🪺", label: "brought you an empty little nest" },
+  { emoji: "🌾", label: "brought you a stalk of wheat" },
+  { emoji: "🧊", label: "brought you an ice cube, somehow unmelted" },
+  { emoji: "🪙", label: "brought you a worn little coin" },
+  { emoji: "🍁", label: "brought you a maple leaf" },
+  { emoji: "🎋", label: "brought you a bamboo sprig" },
+  { emoji: "🪷", label: "brought you a little lotus" },
+  { emoji: "🐝", label: "brought you a pretend bee, made of felt" },
+  { emoji: "🐞", label: "brought you a ladybug charm" },
+  { emoji: "🦋", label: "brought you a delicate butterfly wing" },
+  { emoji: "🌻", label: "brought you a small sunflower" },
+  { emoji: "🍎", label: "brought you a shiny apple" },
+  { emoji: "🍓", label: "brought you a ripe strawberry" },
+  { emoji: "🧸", label: "brought you a tiny teddy bear" },
+  { emoji: "🪆", label: "brought you a miniature nesting doll" },
+  { emoji: "🎐", label: "brought you a little wind chime" },
+  { emoji: "🧦", label: "brought you a mismatched sock" },
+  { emoji: "🥨", label: "brought you a soft pretzel" },
+  { emoji: "🍪", label: "brought you a cookie, slightly nibbled" },
+  { emoji: "🫐", label: "brought you a handful of blueberries" },
+  { emoji: "🦢", label: "brought you a carved wooden swan" },
+  { emoji: "🐢", label: "brought you a tiny toy turtle" },
+  { emoji: "🐌", label: "brought you a snail shell, empty" },
+  { emoji: "🪻", label: "brought you a sprig of hyacinth" },
+  { emoji: "🍇", label: "brought you a few grapes" },
+  { emoji: "🥥", label: "brought you a tiny coconut charm" },
+  { emoji: "🪥", label: "brought you a toothbrush? you're not sure why" },
+  { emoji: "🔑", label: "brought you an old key that doesn't fit anything" },
+  { emoji: "🧩", label: "brought you a single puzzle piece" },
+  { emoji: "🎲", label: "brought you a single die" },
+  { emoji: "🪞", label: "brought you a tiny hand mirror" },
+  { emoji: "🕸️", label: "brought you a bit of spiderweb, carefully preserved" },
+  { emoji: "🦔", label: "brought you a pinecone that looked like a hedgehog" },
+  { emoji: "🌵", label: "brought you a tiny potted cactus" },
+  { emoji: "🍋", label: "brought you a lemon, for some reason" },
+  { emoji: "🥕", label: "brought you a baby carrot" },
+  { emoji: "🎈", label: "brought you a half-deflated balloon" },
+  { emoji: "🪡", label: "brought you a sewing needle — careful with that" },
+  { emoji: "🩰", label: "brought you a tiny ballet shoe charm" },
+  { emoji: "🎭", label: "brought you a tiny theater mask charm" },
+  { emoji: "🖋️", label: "brought you an old fountain pen" },
+  { emoji: "📎", label: "brought you a bent paperclip" },
+  { emoji: "🔖", label: "brought you a ribbon bookmark" },
+  {
+    emoji: "🌟",
+    label: "brought you something rare — a wishing star",
+    rare: true,
+  },
+  {
+    emoji: "🌈",
+    label: "brought you something rare — a tiny rainbow, still faintly glowing",
+    rare: true,
+  },
+  {
+    emoji: "🕰️",
+    label: "brought you something rare — a pocket watch, stopped at an odd hour",
+    rare: true,
+  },
+];
+
+const COMPANION_MOOD_LOG_KEY = "ao3_companion_moods_v1";
+
+// A small deterministic "random" generator seeded by an integer -- same
+// seed always yields the same float in [0, 1). Used so the corner badge's
+// daily choices look random from day to day instead of ticking through
+// the pool in a visible sequence, while still staying fixed for the
+// whole Prague day (no flicker on re-render).
+function seededDailyRandom(seed) {
+  const x = Math.sin(seed * 12.9898 + 78.233) * 43758.5453;
+  return x - Math.floor(x);
+}
+
+// Computes the two things that are fixed for the whole Prague day: which
+// feeling and which trinket "belong" to today. Both are picked with the
+// seeded random above so they're stable all day but don't look like a
+// visible rotation from one day to the next.
+function getDailyCompanionPicks(dayIndex) {
+  const moodIdx = Math.floor(seededDailyRandom(dayIndex + 1000) * COMPANION_FEELINGS.length);
+  const mood = { ...COMPANION_FEELINGS[moodIdx], kind: "feeling" };
+
+  // Rare trinkets get their own long, low-odds roll instead of sitting in
+  // the regular pool -- otherwise adding just one rare entry would make
+  // it show up almost as often as any other trinket, which defeats the
+  // point of it being rare.
+  const rareTrinkets = COMPANION_TRINKETS.filter(t => t.rare);
+  const commonTrinkets = COMPANION_TRINKETS.filter(t => !t.rare);
+  const isRareDay = rareTrinkets.length > 0 && seededDailyRandom(dayIndex + 5000) < 0.035;
+  const trinketPool = isRareDay ? rareTrinkets : commonTrinkets;
+  const trinketIdx = Math.floor(seededDailyRandom(dayIndex + 2000) * trinketPool.length);
+  const trinket = { ...trinketPool[trinketIdx], kind: "trinket" };
+
+  return { mood, trinket };
+}
+
+// ─── Companion mood history: same one-entry-per-day pattern as the
+// trinket log, but for the daily "feeling" pick instead. This is the
+// companion's own mood (from getDailyCompanionPicks), separate from the
+// person's own mood/symptom log elsewhere in the dashboard.
+function getCompanionMoodLog() {
+  try {
+    const log = JSON.parse(localStorage.getItem(COMPANION_MOOD_LOG_KEY) || "[]");
+    return Array.isArray(log) ? log : [];
+  } catch { return []; }
+}
+function saveCompanionMoodLog(log) { localStorage.setItem(COMPANION_MOOD_LOG_KEY, JSON.stringify(log)); }
+function recordCompanionMoodToday(mood) {
+  if (!mood) return;
+  const todayStr = getPragueTodayIso();
+  const log = getCompanionMoodLog();
+  if (log.some(e => e.date === todayStr)) return;
+  log.push({ date: todayStr, emoji: mood.emoji, label: mood.label });
+  saveCompanionMoodLog(log);
+}
+
+function hexToRgba(hex, alpha) {
+  // Also accept rgb()/rgba() input (re-alpha'd) and 3-digit hex, so a
+  // non-hex color can't silently produce an invalid CSS value.
+  const m = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i.exec(String(hex).trim());
+  if (m) return `rgba(${m[1]},${m[2]},${m[3]},${alpha})`;
+  let h = String(hex).trim().replace("#", "");
+  if (h.length === 3) h = h.split("").map(c => c + c).join("");
+  const r = parseInt(h.substring(0, 2), 16);
+  const g = parseInt(h.substring(2, 4), 16);
+  const b = parseInt(h.substring(4, 6), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+function formatPrettyDate(isoDateOnly) {
+  if (!isoDateOnly) return "—";
+  const d = new Date(isoDateOnly + "T00:00:00");
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
+// Opens a small overlay listing the companion's past daily moods, most
+// recent first. Mirrors openTrinketCollection/openFeedHistory's layout.
+function openCompanionMoodHistory(phaseColor) {
+  const log = getCompanionMoodLog().slice().sort((a, b) => b.date.localeCompare(a.date));
+
+  const overlay = document.createElement("div");
+  overlay.style.cssText = `
+    position:fixed; inset:0; background:rgba(20,10,16,0.55); z-index:2147483005;
+    display:flex; align-items:center; justify-content:center; padding:20px;
+  `;
+  overlay.onclick = () => overlay.remove();
+
+  const panel = document.createElement("div");
+  panel.style.cssText = `
+    background:#1c1319; border:1px solid ${hexToRgba(phaseColor, 0.3)}; border-radius:14px;
+    padding:16px; max-width:300px; width:100%; max-height:70vh; overflow-y:auto;
+    box-shadow:0 8px 30px rgba(0,0,0,0.4);
+  `;
+  panel.onclick = (e) => e.stopPropagation();
+
+  const title = document.createElement("div");
+  title.style.cssText = "font-size:13px; font-weight:600; color:#ffeaf4; margin-bottom:10px;";
+  title.textContent = "Companion mood history";
+  panel.appendChild(title);
+
+  if (!log.length) {
+    const empty = document.createElement("div");
+    empty.style.cssText = `font-size:11px; color:${hexToRgba(phaseColor, 0.7)}; line-height:1.5;`;
+    empty.textContent = "nothing yet — check back tomorrow for the next entry.";
+    panel.appendChild(empty);
+  } else {
+    const list = document.createElement("div");
+    list.style.cssText = "display:flex; flex-direction:column; gap:6px;";
+    log.forEach(entry => {
+      const row = document.createElement("div");
+      row.style.cssText = `
+        display:flex; align-items:center; gap:8px;
+        background:${hexToRgba(phaseColor, 0.08)}; border:1px solid ${hexToRgba(phaseColor, 0.2)};
+        border-radius:10px; padding:6px 9px;
+      `;
+      const emojiEl = document.createElement("div");
+      emojiEl.style.cssText = "font-size:17px;";
+      emojiEl.textContent = entry.emoji;
+      const textCol = document.createElement("div");
+      textCol.style.cssText = "display:flex; flex-direction:column; gap:1px; min-width:0;";
+      const labelEl = document.createElement("div");
+      labelEl.style.cssText = "font-size:11px; color:#ffeaf4;";
+      labelEl.textContent = entry.label.replace(/^is /, "").replace(/^feels /, "");
+      const dateEl = document.createElement("div");
+      dateEl.style.cssText = `font-size:9.5px; color:${hexToRgba(phaseColor, 0.6)};`;
+      dateEl.textContent = formatPrettyDate(entry.date);
+      textCol.appendChild(labelEl);
+      textCol.appendChild(dateEl);
+      row.appendChild(emojiEl);
+      row.appendChild(textCol);
+      list.appendChild(row);
+    });
+    panel.appendChild(list);
+
+    const footer = document.createElement("div");
+    footer.style.cssText = `font-size:9.5px; color:${hexToRgba(phaseColor, 0.4)}; margin-top:10px; text-align:center;`;
+    footer.textContent = `${log.length} day${log.length === 1 ? "" : "s"} logged`;
+    panel.appendChild(footer);
+  }
+
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+}
+
+// ─── Comfort message ───
+// A short line reacting to one symptom logged the previous day. Picked
+// deterministically off the day index (both which symptom, if several
+// were logged, and which phrasing) so it's stable through the day and
+// changes the next.
+const COMFORT_MESSAGES = {
+  "Cramps": ["cramps yesterday? heating pad's earned its keep today.", "still sorry about the cramps yesterday. go easy on yourself today."],
+  "Headache": ["hope yesterday's headache is fully gone. drink some water, just in case.", "yesterday's headache didn't go unnoticed. hydrate today, okay?"],
+  "Bloating": ["yesterday's bloating wasn't fun. today's a looser-waistband day.", "noted the bloating yesterday — comfy clothes today, no questions asked."],
+  "Fatigue": ["you were running on empty yesterday. no shame in an early night tonight.", "yesterday's fatigue is allowed to carry into today. rest if you can."],
+  "Acne": ["yesterday's skin stuff is temporary. you're still you.", "hope your skin's feeling calmer today than yesterday."],
+  "PMDD": ["yesterday sounded like a genuinely hard one. you got through it.", "still thinking about how heavy yesterday felt. be extra gentle with yourself today."],
+  "Watery discharge": ["just a body doing normal body things yesterday. nothing to worry about.", "noted yesterday's log. all normal, all fine."],
+  "High libido": ["yesterday had a whole mood, huh. no comment, just noted.", "yesterday's energy was a lot. hope today's just as fun, your way."],
+  "Irritable": ["yesterday's short fuse makes sense. today's a clean slate.", "sorry if yesterday felt snappy. that wasn't a character flaw, just a phase."],
+  "Ovulation pain": ["yesterday's ovulation twinge is noted. hope today's quieter.", "that pain yesterday was real, even if it doesn't show. hope today's easier."],
+  "Flirty": ["yesterday you were feeling yourself. hope some of that's still around.", "noted the flirty energy yesterday. no notes, just cute."],
+  "Craving chocolate": ["yesterday's chocolate craving was valid. still is, honestly.", "hope you got the chocolate yesterday. if not, today's fair game."],
+  "Cravings": ["yesterday's cravings were just your body asking for something. no guilt required.", "noted yesterday's cravings. feeding yourself isn't a moral issue."],
+  "Hot flashes": ["yesterday's hot flashes sound miserable. hope today runs cooler.", "still thinking about the heat yesterday. hydrate, layer light, be patient with it."],
+  "Tender breasts": ["yesterday sounds uncomfortable. a softer bra today might help.", "noted yesterday's tenderness. be a little careful today."],
+  "Self critical": ["yesterday you were harder on yourself than you deserved. today, don't.", "whatever you told yourself yesterday, it probably wasn't true. try again today."],
+  "Oily hair": ["yesterday's hair thing is not a big deal, promise.", "noted, and also: nobody else clocked it like you did."],
+  "Eye strain": ["yesterday's eyes needed a break. take one today too.", "hope the eye strain from yesterday eased off. blink more, screen less, if you can."],
+  "Sweating": ["yesterday ran hot. hope today's a little cooler on you.", "noted yesterday. drink some water today just in case."],
+  "Nesting": ["yesterday's nesting mode was doing something. let the space stay tidy today.", "hope yesterday's cleaning spree left things feeling calmer today."],
+  "Dry eyes": ["yesterday's dry eyes noted. maybe give the screen a rest today.", "hope your eyes feel less scratchy today than yesterday."],
+  "Emotional": ["yesterday was a lot to feel. today, you're allowed to feel less.", "noted how much yesterday held. hope today's a little lighter."],
+  "Sociable": ["yesterday you had people-energy. hope some of it's left for today.", "noted yesterday's social battery running high. use it well today too."],
+  "Feeling okay": ["yesterday was just okay, and that counted for something.", "glad yesterday was steady. hoping today's the same."],
+  "Small appetite": ["yesterday's appetite was quiet. no pressure to force anything today either.", "noted yesterday. eat what sounds good today, even if it's small."],
+  "Vivid dreams": ["yesterday's dreams sound like a lot to carry into a normal day.", "hope your head's a little quieter today after all that dreaming."],
+  "Spasms": ["yesterday's spasms sound rough. take it slower today if you can.", "noted the spasms yesterday. be gentle with your body today."],
+  "Anxiety": ["yesterday sounds like it asked a lot of you. today, one thing at a time.", "still thinking about yesterday's anxiety. you made it through. today too."],
+  "Hungry": ["yesterday you were properly hungry. make sure today feeds you enough.", "noted yesterday. don't skip meals today either."],
+  "Solitary": ["yesterday you needed space, and that's allowed. today too, if you still do.", "noted yesterday's need to be alone. no explanation owed, today or ever."],
+  "Confident": ["yesterday you were glowing. hoping some of that followed you into today.", "noted yesterday's confidence. wear it again today if it's still around."],
+};
+const COMFORT_DEFAULT_TEMPLATES = [
+  s => `you logged "${s}" yesterday. hope today treats you a little better.`,
+  s => `still thinking about the "${s}" from yesterday. be gentle with yourself today.`,
+];
+
+// Remembers the last symptom actually shown in "about yesterday" (with the
+// date it was shown), purely so the next day's pick can avoid repeating it
+// when there's more than one symptom to choose from. Without this, picking
+// straight off getPragueDayIndex() % symptoms.length can land on the same
+// symptom two days running just by coincidence — e.g. if a symptom's
+// position in the (order-preserving) symptoms list happens to line up with
+// the new day's index the same way it did the day before.
+const COMFORT_HISTORY_KEY = "ao3_comfort_symptom_history_v1";
+function getComfortHistory() {
+  try {
+    const h = JSON.parse(localStorage.getItem(COMFORT_HISTORY_KEY) || "null");
+    return (h && typeof h === "object") ? h : { date: null, symptom: null };
+  } catch { return { date: null, symptom: null }; }
+}
+function saveComfortHistory(date, symptom) {
+  localStorage.setItem(COMFORT_HISTORY_KEY, JSON.stringify({ date, symptom }));
+}
+
+function getYesterdaySymptom() {
+  const entry = getMoodForDate(getPragueDaysAgoIso(1));
+  const symptoms = (entry && entry.symptoms) || [];
+  if (!symptoms.length) return null;
+
+  const todayIso = getPragueTodayIso();
+  const history = getComfortHistory();
+
+  // Already picked for today (drawer reopened same day) — stay consistent
+  // rather than re-rolling, same as the rest of the daily-pick pattern.
+  if (history.date === todayIso && symptoms.includes(history.symptom)) {
+    return history.symptom;
+  }
+
+  const baseIdx = getPragueDayIndex() % symptoms.length;
+  let symptom = symptoms[baseIdx];
+
+  // If that's the same symptom shown last time and there's more than one
+  // option today, rotate to the next one instead of repeating it.
+  if (symptoms.length > 1 && symptom === history.symptom) {
+    symptom = symptoms[(baseIdx + 1) % symptoms.length];
+  }
+
+  saveComfortHistory(todayIso, symptom);
+  return symptom;
+}
+
+function getComfortMessage() {
+  const symptom = getYesterdaySymptom();
+  if (!symptom) return null;
+  const pool = COMFORT_MESSAGES[symptom] || COMFORT_DEFAULT_TEMPLATES.map(fn => fn(symptom));
+  const msg = pool[getPragueDayIndex() % pool.length];
+  return { symptom, msg };
+}
+
+// ─── Daily affirmation ───
+// A short comforting/insightful line, picked deterministically off the day
+// index so it's stable through the day and changes the next. Not tied to
+// any logged data — just a nice thing to read.
+const AFFIRMATION_QUOTES = [
+  "you don't have to earn rest today.",
+  "whatever today looks like, it's enough.",
+  "you're allowed to move slower than yesterday.",
+  "small progress still counts as progress.",
+  "you're doing better than the inside of your head is telling you.",
+  "it's okay to not have a plan for today.",
+  "you're allowed to take up space, today included.",
+  "nobody's keeping score. you can stop too.",
+  "today doesn't have to be productive to be good.",
+  "you're allowed to change your mind about today.",
+  "being tired isn't a character flaw.",
+  "you get to decide what today is for.",
+  "you've survived every hard day so far. that's not nothing.",
+  "you don't owe anyone your best today.",
+  "rest is not something you have to justify.",
+  "you're allowed to ask for an easier day.",
+  "it's fine if today is just a maintenance day.",
+  "you're not behind. there's no schedule.",
+  "you can be proud of yourself for smaller things than you think.",
+  "today, good enough is good enough.",
+  "you're allowed to close the tab and just breathe for a minute.",
+  "whatever you're carrying right now, you don't have to carry it perfectly.",
+  "you're not too much. today included.",
+  "it's okay to need a soft day.",
+  "you get to be gentle with yourself, starting now.",
+];
+
+function getDailyAffirmation() {
+  return AFFIRMATION_QUOTES[getPragueDayIndex() % AFFIRMATION_QUOTES.length];
+}
 let CM=null;
 const trk=()=>{const d=new Set();moodArr().forEach(e=>e.date&&d.add(e.date));arr('period').forEach(x=>{x.start&&d.add(x.start);x.end&&d.add(x.end)});return d.size};
 function companion(c){const n=trk();let i=0;CS.forEach((x,k)=>{if(n>=x[0])i=k});const st=CS[i],nx=CS[i+1],m=rows[CK]?.value||{},pool=CMSG[c?c.ph:'follicular'];
+ const comfort=getComfortMessage();
+ const dailyMood=getDailyCompanionPicks(getPragueDayIndex()).mood;recordCompanionMoodToday(dailyMood);
  const msg=CM||pool[(Math.floor(Date.parse(LD)/864e5))%pool.length];
- return `<div class="cy co"><div class=em>${st[1]}</div><div style="flex:1"><b>${st[2]}</b><div class=m>${n} tracked day${n===1?'':'s'}${nx?` · ${nx[0]-n} to grow`:''}${m.streak?` · 💗 ${m.streak}-day streak`:''}</div><div class=m style="margin-top:4px;font-style:italic">${esc(msg)}</div></div><button data-a=lg-h>say hi</button></div>`}
+ return `<div class="cy co"><div class=em>${st[1]}</div><div style="flex:1"><b>${st[2]}</b><div class=m>${n} tracked day${n===1?'':'s'}${nx?` · ${nx[0]-n} to grow`:''}${m.streak?` · 💗 ${m.streak}-day streak`:''}</div><div class=m style="margin-top:4px;font-style:italic">${esc(msg)}</div><div class=m data-a=lg-mh data-pc="${PC[c?c.ph:'follicular']||'#ffb8dc'}" style="margin-top:7px;padding-top:7px;border-top:1px solid rgba(255,255,255,.12);cursor:pointer;"><span style="opacity:0.75;">${dailyMood.emoji} feeling today —</span> Your companion ${dailyMood.label}.</div><div class=m style="margin-top:7px;padding-top:7px;border-top:1px solid rgba(255,255,255,.12)"><span style="opacity:0.75;">✧ today —</span> ${getDailyAffirmation()}</div>${comfort?`<div class=m style="margin-top:7px;padding-top:7px;border-top:1px solid rgba(255,255,255,.12)"><span style="opacity:0.75;">${SI[comfort.symptom]||"🫂"} about yesterday —</span> ${comfort.msg}</div>`:`<div class=m style="margin-top:7px;padding-top:7px;border-top:1px solid rgba(255,255,255,.12);opacity:0.7;">no symptoms logged yesterday.</div>`}</div><button data-a=lg-h>say hi</button></div>`}
 let petBusy=false;
 async function pet(){if(petBusy)return;petBusy=true;const m={pets:0,lastPetDate:null,streak:0,...(rows[CK]?.value||{})},t=today(),y=dk(Date.now()-864e5);let ms=false;
  if(m.lastPetDate!==t){m.streak=m.lastPetDate===y?(m.streak||0)+1:1;m.lastPetDate=t;ms=MS.includes(m.streak)}
@@ -818,12 +1260,15 @@ function pastLetters(c){const P=arr('period').filter(p=>p.start).sort((a,b)=>a.s
  for(let i=P.length-2;i>=0;i--){const k=addD(P[i].start,c.day-1),len=ddf(P[i].start,P[i+1].start),l=L.find(y=>y.date===k);if(c.day>len||!l)continue;r.push({date:k,text:l.text,ago:P.length-1-i})}return r}
 function mbView(){const t=today(),c=cyc(t);
  if(!c)return'<p class=empty>Log a period first so today can be placed in your cycle — the brief works from that.</p>';
- const ac=PC[c.ph],sc=scoreFor(c.day,c,t),hc=sc?sc.color:ac,tiles=mbTiles(c,t),custom=(rows[TTK]?.value||{})[c.day],
+ const ac=PC[c.ph],sc=scoreFor(c.day,c,t),hc=sc?sc.color:ac,tiles=mbTiles(c,t),
  dt2=new Date(t+'T12:00').toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'});
  let h=`<div class=mbh style="background:radial-gradient(circle at 50% 0%,${rgba(hc,.22)},transparent 70%),rgba(255,255,255,.02);border-color:${rgba(hc,.4)}"><div class=eb style="color:${hc}">☀️ morning brief</div><div class=dy style="text-shadow:0 0 22px ${rgba(hc,.55)}">Day ${c.day}</div><div class=ph style="color:${hc}">${PH[c.ph][1]}</div><div class=dd>${esc(dt2)}</div>`;
  if(sc){const C=2*Math.PI*50;h+=`<div class=ring><svg viewBox="0 0 116 116" style="transform:rotate(-90deg)"><circle cx=58 cy=58 r=50 fill=none stroke="${rgba(hc,.14)}" stroke-width=7 /><circle cx=58 cy=58 r=50 fill=none stroke="${hc}" stroke-width=7 stroke-linecap=round stroke-dasharray="${C} ${C}" stroke-dashoffset="${C*(1-sc.score/100)}"/></svg><div><b style="color:${hc}">${sc.score}</b><small>out of 100</small></div></div><div style="font-size:13px;font-weight:700;color:${hc};margin-top:10px">${sc.label}</div>`}
  if(tiles.length)h+=`<div class=tl3 style="grid-template-columns:repeat(${tiles.length},1fr)">${tiles.map(m=>{const up=m.d>=.15,dn=m.d<=-.15;return `<div><span style="font-size:16px">${m.i}</span><b>${m.v.toFixed(1)}</b><small style="color:${up?'#8fd9c4':dn?'#ff9ecf':'inherit'};${up||dn?'':'opacity:.5'}">${up?'▲ '+m.d.toFixed(1):dn?'▼ '+Math.abs(m.d).toFixed(1):'usual'}</small></div>`}).join('')}</div>`;
- h+=`<div style="width:100%;margin-top:12px;padding-top:10px;border-top:1px solid ${rgba(hc,.16)};font-size:13px;font-style:italic;opacity:.9">${custom?esc(custom):(sc?'':'No history for this cycle day yet.')}</div>`.replace(/<div style="width:100%[^>]*><\/div>/,'')
+ // Today's daily title (plain text, no tags) — ported from the userscript's showMorningBrief
+ const pst=getPeriodStats(),gt=getCycleDayTitle(pst.currentCycleDay??c.day,pst),
+ gtext=[...(gt.tags||[]),gt.custom?gt.text:(gt.items||[]).map(i=>i.label).join(", ")].filter(Boolean).join(" · ")||null;
+ h+=`<div style="width:100%;box-sizing:border-box;margin-top:14px;padding-top:12px;border-top:1px solid ${rgba(hc,.16)};font-size:13px;line-height:1.45;font-style:italic;color:${gtext?'rgba(255,234,244,0.92)':'rgba(255,234,244,0.5)'}">${esc(gtext||gt.empty||'No history for this cycle day yet.')}</div>`;
  h+='</div>';
  // likely symptoms
  const cn={};let ne=0;moodArr().forEach(e=>{const k=cyc(e.date);if(!k||k.day!==c.day||e.date===t)return;ne++;(e.symptoms||[]).forEach(y=>cn[y]=(cn[y]||0)+1)});
